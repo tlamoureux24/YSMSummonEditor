@@ -13,7 +13,7 @@ use crate::theme::{self, color, space};
 use crate::widgets::{self, Segment};
 
 pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
-    let frame = egui::Frame::new().fill(color::WINDOW_BG).inner_margin(Margin::symmetric(space::MD as i8, 6));
+    let frame = egui::Frame::new().fill(color::window_bg()).inner_margin(Margin::symmetric(space::MD as i8, 6));
     egui::Panel::top("toolbar").frame(frame).show_separator_line(false).show(ui, |ui| {
         ui.horizontal(|ui| {
             ui.set_height(theme::CONTROL_HEIGHT);
@@ -31,14 +31,14 @@ fn branding(ui: &mut Ui, view: &ViewContext<'_>) {
 
     // One text layout, so the title and the byline share a baseline.
     let mut job = LayoutJob::default();
-    let title = TextFormat { font_id: theme::bold(theme::TITLE_SIZE), color: color::TEXT, ..Default::default() };
-    let byline = TextFormat { font_id: theme::caption(), color: color::TEXT_MUTED, ..Default::default() };
+    let title = TextFormat { font_id: theme::bold(theme::TITLE_SIZE), color: color::text(), ..Default::default() };
+    let byline = TextFormat { font_id: theme::caption(), color: color::text_muted(), ..Default::default() };
     job.append("Summon Editor", 0.0, title);
     job.append("made by YoSiem", space::SM, byline);
     ui.add(egui::Label::new(job).selectable(false));
 
     if view.state.demo {
-        widgets::badge(ui, "DEMO DATA", color::WARNING)
+        widgets::badge(ui, "DEMO DATA", color::warning())
             .on_hover_text("Running on built-in sample data. Nothing is written to a database.");
     }
 }
@@ -99,5 +99,5 @@ fn actions(ui: &mut Ui, view: &mut ViewContext<'_>) {
 /// A short vertical hairline between groups of toolbar actions.
 fn group_divider(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(space::SM, theme::CONTROL_HEIGHT), egui::Sense::hover());
-    ui.painter().vline(rect.center().x, rect.y_range().shrink(6.0), Stroke::new(1.0, color::CONTROL_BORDER));
+    ui.painter().vline(rect.center().x, rect.y_range().shrink(6.0), Stroke::new(1.0, color::control_border()));
 }

@@ -129,7 +129,7 @@ impl SkillEditDialog {
         let mut apply = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::EDIT, color::ACCENT_BRIGHT, &title, 784.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::EDIT, color::accent_bright(), &title, 784.0, |ui| {
             let business = self.rows.iter().filter(|row| row.business).count();
             let business_label = format!("Business fields · {business}");
             let all_label = format!("All columns · {}", self.rows.len());
@@ -179,7 +179,7 @@ impl SkillEditDialog {
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     if has_errors {
-                        modal::note(ui, icons::WARNING, "Fix the highlighted values before applying.", color::DANGER);
+                        modal::note(ui, icons::WARNING, "Fix the highlighted values before applying.", color::danger());
                     } else if changed == 0 {
                         ui.label(widgets::caption("No changes"));
                     } else {
@@ -230,7 +230,7 @@ impl SkillEditDialog {
 
                     table_row.col(|ui| {
                         if dirty {
-                            band.paint(ui, color::ROW_DIRTY);
+                            band.paint(ui, color::row_dirty());
                         }
                         ui.add_space(space::SM);
                         let name = RichText::new(&row.name);
@@ -273,13 +273,13 @@ fn value_editor(ui: &mut Ui, row: &mut FieldRow) {
 
     let mut field = widgets::text_field(&mut row.text).desired_width(f32::INFINITY);
     if row.error.is_some() {
-        field = field.text_color(color::DANGER);
+        field = field.text_color(color::danger());
     }
     let response = ui.add(field);
     if response.changed() {
         row.validate();
     }
     if let Some(error) = &row.error {
-        response.on_hover_text(RichText::new(error).color(color::DANGER));
+        response.on_hover_text(RichText::new(error).color(color::danger()));
     }
 }

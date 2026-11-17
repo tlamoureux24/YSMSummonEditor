@@ -38,7 +38,7 @@ impl SaveReviewDialog {
         let mut confirmed = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::CHANGES, color::ACCENT_BRIGHT, "Review Changes", 980.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::CHANGES, color::accent_bright(), "Review Changes", 980.0, |ui| {
             let changes_label = format!("Changes · {}", self.rows.len());
             let segments = [
                 Segment { icon: icons::CHANGES, label: &changes_label, tooltip: "Every change, with before and after" },
@@ -140,7 +140,7 @@ impl SaveReviewDialog {
                         ui.label(widgets::muted(row.field.as_str()));
                     });
                     table_row.col(|ui| {
-                        let text = RichText::new(&row.before).color(color::TEXT_MUTED);
+                        let text = RichText::new(&row.before).color(color::text_muted());
                         let text = if row.kind == ReviewKind::Delete { text.strikethrough() } else { text };
                         ui.add(egui::Label::new(text).truncate()).on_hover_text(&row.before);
                     });
@@ -170,8 +170,8 @@ impl SaveReviewDialog {
 
 fn kind_style(kind: ReviewKind) -> (&'static str, Color32, &'static str) {
     match kind {
-        ReviewKind::Insert => (icons::INSERTED, color::SUCCESS, "Inserted"),
-        ReviewKind::Update => (icons::EDIT, color::WARNING, "Updated"),
-        ReviewKind::Delete => (icons::DELETED, color::DANGER, "Deleted"),
+        ReviewKind::Insert => (icons::INSERTED, color::success(), "Inserted"),
+        ReviewKind::Update => (icons::EDIT, color::warning(), "Updated"),
+        ReviewKind::Delete => (icons::DELETED, color::danger(), "Deleted"),
     }
 }

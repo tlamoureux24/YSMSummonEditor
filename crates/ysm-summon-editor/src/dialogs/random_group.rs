@@ -105,7 +105,7 @@ impl RandomGroupDialog {
         let mut apply = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::RANDOM_GROUP, color::ACCENT_BRIGHT, &title, 912.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::RANDOM_GROUP, color::accent_bright(), &title, 912.0, |ui| {
             ui.label(widgets::muted(
                 "A tree row with this group grants one random skill out of the candidates. \
                  Candidates are kept sorted by skill ID, and UseCode always equals their number.",
@@ -218,7 +218,7 @@ impl RandomGroupDialog {
                 widgets::section_title(ui, "Group candidates");
             },
             |ui| {
-                let tint = if full { color::WARNING } else { color::TEXT_MUTED };
+                let tint = if full { color::warning() } else { color::text_muted() };
                 ui.label(RichText::new(count).size(theme::CAPTION_SIZE).color(tint));
             },
         );

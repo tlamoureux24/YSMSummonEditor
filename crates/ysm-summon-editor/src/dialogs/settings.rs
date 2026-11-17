@@ -4,7 +4,7 @@
 //! one shared line, help text under the control it belongs to.
 
 use eframe::egui::{self, RichText, Ui};
-use ysm_data::{AppSettings, DbProvider};
+use ysm_data::{AppSettings, DbProvider, ThemeChoice};
 
 use super::DialogContext;
 use crate::action::Action;
@@ -85,7 +85,7 @@ impl SettingsDialog {
         let mut save = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::SETTINGS, color::ACCENT_BRIGHT, "Settings", 560.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::SETTINGS, color::accent_bright(), "Settings", 560.0, |ui| {
             ui.spacing_mut().item_spacing.y = space::MD;
 
             widgets::section_title(ui, "Database");
@@ -106,8 +106,33 @@ impl SettingsDialog {
             });
             help(ui, "Scanned recursively for summon and skill images (png, jpg, bmp, webp, tga, dds).");
 
+            ui.add_space(space::XS);
+            widgets::divider(ui);
+            ui.add_space(space::XS);
+
+            widgets::section_title(ui, "Appearance");
+            widgets::form_row(ui, "Theme", |ui| {
+                let segments = ThemeChoice::ALL.map(|choice| match choice {
+                    ThemeChoice::Dark => {
+                        widgets::Segment { icon: icons::THEME_DARK, label: "Dark", tooltip: "Dark theme" }
+                    }
+                    ThemeChoice::Light => {
+                        widgets::Segment { icon: icons::THEME_LIGHT, label: "Light", tooltip: "Light theme" }
+                    }
+                    ThemeChoice::System => widgets::Segment {
+                        icon: icons::THEME_SYSTEM,
+                        label: "System",
+                        tooltip: "Follow the operating system's setting",
+                    },
+                });
+                let selected = ThemeChoice::ALL.iter().position(|c| *c == self.working.theme).unwrap_or(0);
+                if let Some(index) = widgets::segmented(ui, &segments, selected, 96.0) {
+                    self.working.theme = ThemeChoice::ALL[index];
+                }
+            });
+
             if let Some(message) = &self.validation {
-                widgets::form_note(ui, |ui| modal::note(ui, icons::WARNING, message, color::DANGER));
+                widgets::form_note(ui, |ui| modal::note(ui, icons::WARNING, message, color::danger()));
             }
 
             let dirty = self.is_dirty();
@@ -228,11 +253,11 @@ impl SettingsDialog {
                     ui.spinner();
                 }
                 TestState::Passed(server) => {
-                    ui.label(RichText::new(format!("{}  Connected", icons::SUCCESS)).color(color::SUCCESS))
+                    ui.label(RichText::new(format!("{}  Connected", icons::SUCCESS)).color(color::success()))
                         .on_hover_text(server.as_str());
                 }
                 TestState::Failed(error) => {
-                    ui.label(RichText::new(format!("{}  Failed", icons::ERROR)).color(color::DANGER))
+                    ui.label(RichText::new(format!("{}  Failed", icons::ERROR)).color(color::danger()))
                         .on_hover_text(error.as_str());
                 }
             }
@@ -241,7 +266,7 @@ impl SettingsDialog {
             // The first line says what went wrong; the tooltip above holds the rest.
             let first_line = error.lines().next().unwrap_or_default();
             widgets::form_note(ui, |ui| {
-                ui.add(egui::Label::new(widgets::caption(first_line).color(color::DANGER)).wrap());
+                ui.add(egui::Label::new(widgets::caption(first_line).color(color::danger())).wrap());
             });
         }
     }

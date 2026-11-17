@@ -108,6 +108,20 @@ impl DbSettings {
     }
 }
 
+/// Colour theme of the interface.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
+pub enum ThemeChoice {
+    #[default]
+    Dark,
+    Light,
+    /// Follows the operating system's setting.
+    System,
+}
+
+impl ThemeChoice {
+    pub const ALL: [ThemeChoice; 3] = [ThemeChoice::Dark, ThemeChoice::Light, ThemeChoice::System];
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Default, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]
 pub struct AppSettings {
@@ -117,6 +131,8 @@ pub struct AppSettings {
     pub include_non_form1_by_default: bool,
     pub show_all_evolutions_by_default: bool,
     pub save_to_sql_mode: bool,
+    /// Missing in older files: dark, the original look.
+    pub theme: ThemeChoice,
 }
 
 pub struct SettingsStore {

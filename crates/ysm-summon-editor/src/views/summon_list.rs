@@ -15,7 +15,7 @@ use crate::widgets;
 /// Takes the state mutably because the search box and filter toggles are
 /// bound to it directly; everything else still goes through actions.
 pub fn show(ui: &mut Ui, state: &mut AppState, textures: &mut TextureStore, actions: &mut Vec<Action>) {
-    let frame = egui::Frame::new().fill(color::WINDOW_BG).inner_margin(Margin {
+    let frame = egui::Frame::new().fill(color::window_bg()).inner_margin(Margin {
         left: space::SM as i8,
         right: 0,
         top: 2,
@@ -43,7 +43,7 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     let row = Vec2::new(ui.available_width(), theme::CONTROL_HEIGHT);
     ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
         let filter_active = state.filter.include_riding_only || state.filter.final_only;
-        let tint = if filter_active { color::ACCENT_BRIGHT } else { color::TEXT };
+        let tint = if filter_active { color::accent_bright() } else { color::text() };
         let icon = RichText::new(icons::FILTER).size(theme::GLYPH_SIZE).color(tint);
         let filter = egui::Button::new(icon).min_size(Vec2::splat(theme::CONTROL_HEIGHT));
         let keep_open =
@@ -135,9 +135,9 @@ fn row(ui: &mut Ui, summon: &SummonListItem, selected: bool, textures: &mut Text
     // A 2 px inset keeps neighbouring highlights from touching.
     let highlight = rect.shrink2(Vec2::new(0.0, 1.0));
     if selected {
-        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::ROW_SELECTED);
+        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::row_selected());
     } else if response.hovered() {
-        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::ROW_HOVER);
+        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::row_hover());
     }
 
     let icon_rect = egui::Rect::from_center_size(
@@ -155,7 +155,7 @@ fn row(ui: &mut Ui, summon: &SummonListItem, selected: bool, textures: &mut Text
         Align2::LEFT_CENTER,
         &summon.summon_name,
         theme::bold(theme::BODY_SIZE),
-        color::TEXT,
+        color::text(),
     );
     let mut detail = summon.summon_id.to_string();
     if summon.is_riding_only {
@@ -166,7 +166,7 @@ fn row(ui: &mut Ui, summon: &SummonListItem, selected: bool, textures: &mut Text
         Align2::LEFT_CENTER,
         detail,
         theme::caption(),
-        color::TEXT_MUTED,
+        color::text_muted(),
     );
 
     response.on_hover_ui(|ui| {

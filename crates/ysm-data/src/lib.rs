@@ -21,4 +21,4 @@ pub use memory::InMemoryRepository;
 pub use mssql::MssqlRepository;
 pub use pg::PgRepository;
 pub use repository::SummonRepository;
-pub use settings::{AppSettings, DbProvider, DbSettings, SettingsStore};
+pub use settings::{AppSettings, DbProvider, DbSettings, SettingsStore, ThemeChoice};

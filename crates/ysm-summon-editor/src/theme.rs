@@ -13,64 +13,280 @@ use std::sync::Arc;
 use eframe::egui::{
     self, CornerRadius, FontData, FontDefinitions, FontFamily, FontId, Margin, Stroke, TextStyle, Vec2,
 };
+use ysm_data::ThemeChoice;
 
 pub mod color {
+    use std::sync::atomic::{AtomicBool, Ordering};
+
     use eframe::egui::Color32;
 
-    // Surfaces, darkest to lightest.
+    /// Whether the light palette is in use; set by [`super::apply`].
+    static LIGHT: AtomicBool = AtomicBool::new(false);
+
+    pub(crate) fn set_light(light: bool) {
+        LIGHT.store(light, Ordering::Relaxed);
+    }
+
+    pub fn is_light() -> bool {
+        LIGHT.load(Ordering::Relaxed)
+    }
+
+    /// Every colour of the interface, once per theme.
+    struct Palette {
+        window_bg: Color32,
+        panel_bg: Color32,
+        control_bg: Color32,
+        control_hover: Color32,
+        control_pressed: Color32,
+        panel_alt: Color32,
+        input_bg: Color32,
+        border: Color32,
+        control_border: Color32,
+        border_strong: Color32,
+        border_focus: Color32,
+        text: Color32,
+        text_muted: Color32,
+        text_faint: Color32,
+        text_disabled: Color32,
+        accent_bright: Color32,
+        primary: Color32,
+        primary_disabled: Color32,
+        accent_subtle: Color32,
+        row_stripe: Color32,
+        row_hover: Color32,
+        row_selected: Color32,
+        row_dirty: Color32,
+        success: Color32,
+        warning: Color32,
+        danger: Color32,
+        danger_bg: Color32,
+        info: Color32,
+        dirty_mark: Color32,
+        hover_tint: Color32,
+        on_primary_disabled: Color32,
+    }
+
+    /// The original dark palette.
+    const DARK: Palette = Palette {
+        window_bg: Color32::from_rgb(0x14, 0x16, 0x1B),
+        panel_bg: Color32::from_rgb(0x1B, 0x1E, 0x24),
+        control_bg: Color32::from_rgb(0x23, 0x27, 0x32),
+        control_hover: Color32::from_rgb(0x2A, 0x2F, 0x3B),
+        control_pressed: Color32::from_rgb(0x1F, 0x23, 0x2C),
+        panel_alt: Color32::from_rgb(0x25, 0x2A, 0x35),
+        input_bg: Color32::from_rgb(0x14, 0x16, 0x1B),
+        border: Color32::from_rgb(0x2A, 0x2E, 0x38),
+        control_border: Color32::from_rgb(0x33, 0x39, 0x47),
+        border_strong: Color32::from_rgb(0x41, 0x4A, 0x5C),
+        border_focus: Color32::from_rgb(0x5B, 0x94, 0xFF),
+        text: Color32::from_rgb(0xE8, 0xEB, 0xF0),
+        text_muted: Color32::from_rgb(0xA9, 0xB1, 0xC0),
+        text_faint: Color32::from_rgb(0x6C, 0x74, 0x84),
+        text_disabled: Color32::from_rgb(0x59, 0x60, 0x72),
+        accent_bright: Color32::from_rgb(0x79, 0xA8, 0xFF),
+        primary: Color32::from_rgb(0x2F, 0x6F, 0xED),
+        primary_disabled: Color32::from_rgb(0x22, 0x30, 0x55),
+        accent_subtle: Color32::from_rgba_premultiplied(17, 29, 54, 56),
+        row_stripe: Color32::from_rgba_premultiplied(5, 5, 5, 5),
+        row_hover: Color32::from_rgb(0x2A, 0x2F, 0x3B),
+        row_selected: Color32::from_rgba_premultiplied(25, 41, 77, 80),
+        row_dirty: Color32::from_rgba_premultiplied(37, 27, 6, 45),
+        success: Color32::from_rgb(0x3F, 0xB9, 0x50),
+        warning: Color32::from_rgb(0xD2, 0x99, 0x22),
+        danger: Color32::from_rgb(0xF8, 0x51, 0x49),
+        danger_bg: Color32::from_rgb(0xB6, 0x23, 0x24),
+        info: Color32::from_rgb(0x79, 0xA8, 0xFF),
+        dirty_mark: Color32::from_rgb(0xD2, 0x99, 0x22),
+        hover_tint: Color32::from_rgba_premultiplied(8, 8, 8, 8),
+        on_primary_disabled: Color32::from_rgba_premultiplied(115, 115, 115, 115),
+    };
+
+    /// Same roles on light surfaces; text and accents darkened for contrast.
+    const LIGHT_PALETTE: Palette = Palette {
+        window_bg: Color32::from_rgb(0xE6, 0xE9, 0xEF),
+        panel_bg: Color32::from_rgb(0xF7, 0xF8, 0xFA),
+        control_bg: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+        control_hover: Color32::from_rgb(0xEE, 0xF1, 0xF6),
+        control_pressed: Color32::from_rgb(0xE1, 0xE5, 0xEC),
+        panel_alt: Color32::from_rgb(0xFF, 0xFF, 0xFF),
+        input_bg: Color32::from_rgb(0xEC, 0xEF, 0xF3),
+        border: Color32::from_rgb(0xD5, 0xDA, 0xE2),
+        control_border: Color32::from_rgb(0xC3, 0xC9, 0xD4),
+        border_strong: Color32::from_rgb(0xA3, 0xAB, 0xB9),
+        border_focus: Color32::from_rgb(0x2F, 0x6F, 0xED),
+        text: Color32::from_rgb(0x1B, 0x1F, 0x27),
+        text_muted: Color32::from_rgb(0x4E, 0x56, 0x66),
+        text_faint: Color32::from_rgb(0x7C, 0x84, 0x94),
+        text_disabled: Color32::from_rgb(0xA0, 0xA7, 0xB4),
+        accent_bright: Color32::from_rgb(0x1F, 0x5F, 0xD6),
+        primary: Color32::from_rgb(0x2F, 0x6F, 0xED),
+        primary_disabled: Color32::from_rgb(0xB9, 0xCB, 0xF2),
+        accent_subtle: Color32::from_rgba_premultiplied(6, 13, 28, 31),
+        row_stripe: Color32::from_rgba_premultiplied(0, 0, 0, 5),
+        row_hover: Color32::from_rgb(0xE8, 0xEC, 0xF3),
+        row_selected: Color32::from_rgba_premultiplied(8, 18, 38, 41),
+        row_dirty: Color32::from_rgba_premultiplied(29, 21, 5, 36),
+        success: Color32::from_rgb(0x1A, 0x7F, 0x37),
+        warning: Color32::from_rgb(0x9A, 0x67, 0x00),
+        danger: Color32::from_rgb(0xCF, 0x22, 0x2E),
+        danger_bg: Color32::from_rgb(0xCF, 0x22, 0x2E),
+        info: Color32::from_rgb(0x1F, 0x5F, 0xD6),
+        dirty_mark: Color32::from_rgb(0x9A, 0x67, 0x00),
+        hover_tint: Color32::from_black_alpha(8),
+        on_primary_disabled: Color32::from_rgba_premultiplied(230, 230, 230, 230),
+    };
+
+    fn palette() -> &'static Palette {
+        if is_light() { &LIGHT_PALETTE } else { &DARK }
+    }
+
+    // Surfaces: shell < content < control < menu. Borders, text, accent, rows and semantic colours follow.
     /// Application chrome: toolbar, status bar and the gaps between cards.
-    pub const WINDOW_BG: Color32 = Color32::from_rgb(0x14, 0x16, 0x1B);
+    pub fn window_bg() -> Color32 {
+        palette().window_bg
+    }
     /// Cards and dialogs: the surface the user works on.
-    pub const PANEL_BG: Color32 = Color32::from_rgb(0x1B, 0x1E, 0x24);
+    pub fn panel_bg() -> Color32 {
+        palette().panel_bg
+    }
     /// Inputs and secondary buttons at rest.
-    pub const CONTROL_BG: Color32 = Color32::from_rgb(0x23, 0x27, 0x32);
-    pub const CONTROL_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2F, 0x3B);
-    pub const CONTROL_PRESSED: Color32 = Color32::from_rgb(0x1F, 0x23, 0x2C);
+    pub fn control_bg() -> Color32 {
+        palette().control_bg
+    }
+    pub fn control_hover() -> Color32 {
+        palette().control_hover
+    }
+    pub fn control_pressed() -> Color32 {
+        palette().control_pressed
+    }
     /// Menus, popovers, tooltips and toasts.
-    pub const PANEL_ALT: Color32 = Color32::from_rgb(0x25, 0x2A, 0x35);
+    pub fn panel_alt() -> Color32 {
+        palette().panel_alt
+    }
     /// Recessed areas inside a card or dialog: lists, code, charts.
-    pub const INPUT_BG: Color32 = Color32::from_rgb(0x14, 0x16, 0x1B);
-
-    // Borders.
+    pub fn input_bg() -> Color32 {
+        palette().input_bg
+    }
     /// Hairlines: separators and card outlines.
-    pub const BORDER: Color32 = Color32::from_rgb(0x2A, 0x2E, 0x38);
+    pub fn border() -> Color32 {
+        palette().border
+    }
     /// Control outlines at rest.
-    pub const CONTROL_BORDER: Color32 = Color32::from_rgb(0x33, 0x39, 0x47);
-    pub const BORDER_STRONG: Color32 = Color32::from_rgb(0x41, 0x4A, 0x5C);
-    pub const BORDER_FOCUS: Color32 = Color32::from_rgb(0x5B, 0x94, 0xFF);
-
-    // Text.
-    pub const TEXT: Color32 = Color32::from_rgb(0xE8, 0xEB, 0xF0);
+    pub fn control_border() -> Color32 {
+        palette().control_border
+    }
+    pub fn border_strong() -> Color32 {
+        palette().border_strong
+    }
+    pub fn border_focus() -> Color32 {
+        palette().border_focus
+    }
+    pub fn text() -> Color32 {
+        palette().text
+    }
     /// Secondary text: captions, help, inactive items.
-    pub const TEXT_MUTED: Color32 = Color32::from_rgb(0xA9, 0xB1, 0xC0);
+    pub fn text_muted() -> Color32 {
+        palette().text_muted
+    }
     /// Placeholders and de-emphasised values such as zeros in a grid.
-    pub const TEXT_FAINT: Color32 = Color32::from_rgb(0x6C, 0x74, 0x84);
-    pub const TEXT_DISABLED: Color32 = Color32::from_rgb(0x59, 0x60, 0x72);
+    pub fn text_faint() -> Color32 {
+        palette().text_faint
+    }
+    pub fn text_disabled() -> Color32 {
+        palette().text_disabled
+    }
     /// Links, active tabs and selected items.
-    pub const ACCENT_BRIGHT: Color32 = Color32::from_rgb(0x79, 0xA8, 0xFF);
-
-    // Accent.
-    pub const PRIMARY: Color32 = Color32::from_rgb(0x2F, 0x6F, 0xED);
-    pub const PRIMARY_DISABLED: Color32 = Color32::from_rgb(0x22, 0x30, 0x55);
+    pub fn accent_bright() -> Color32 {
+        palette().accent_bright
+    }
+    pub fn primary() -> Color32 {
+        palette().primary
+    }
+    pub fn primary_disabled() -> Color32 {
+        palette().primary_disabled
+    }
     /// Fill of the active tab or segment.
-    pub const ACCENT_SUBTLE: Color32 = Color32::from_rgba_premultiplied(17, 29, 54, 56);
-
-    // Rows. The tints are translucent so they sit on any surface.
-    pub const ROW_STRIPE: Color32 = Color32::from_rgba_premultiplied(5, 5, 5, 5);
-    pub const ROW_HOVER: Color32 = Color32::from_rgb(0x2A, 0x2F, 0x3B);
-    pub const ROW_SELECTED: Color32 = Color32::from_rgba_premultiplied(25, 41, 77, 80);
+    pub fn accent_subtle() -> Color32 {
+        palette().accent_subtle
+    }
+    pub fn row_stripe() -> Color32 {
+        palette().row_stripe
+    }
+    pub fn row_hover() -> Color32 {
+        palette().row_hover
+    }
+    pub fn row_selected() -> Color32 {
+        palette().row_selected
+    }
     /// A row with staged changes.
-    pub const ROW_DIRTY: Color32 = Color32::from_rgba_premultiplied(37, 27, 6, 45);
-
-    // Semantic.
-    pub const SUCCESS: Color32 = Color32::from_rgb(0x3F, 0xB9, 0x50);
-    pub const WARNING: Color32 = Color32::from_rgb(0xD2, 0x99, 0x22);
-    pub const DANGER: Color32 = Color32::from_rgb(0xF8, 0x51, 0x49);
+    pub fn row_dirty() -> Color32 {
+        palette().row_dirty
+    }
+    pub fn success() -> Color32 {
+        palette().success
+    }
+    pub fn warning() -> Color32 {
+        palette().warning
+    }
+    pub fn danger() -> Color32 {
+        palette().danger
+    }
     /// Fill of destructive buttons; dark enough for white text.
-    pub const DANGER_BG: Color32 = Color32::from_rgb(0xB6, 0x23, 0x24);
-    pub const INFO: Color32 = Color32::from_rgb(0x79, 0xA8, 0xFF);
+    pub fn danger_bg() -> Color32 {
+        palette().danger_bg
+    }
+    pub fn info() -> Color32 {
+        palette().info
+    }
     /// Values and markers of staged, unsaved edits.
-    pub const DIRTY_MARK: Color32 = Color32::from_rgb(0xD2, 0x99, 0x22);
+    pub fn dirty_mark() -> Color32 {
+        palette().dirty_mark
+    }
+    /// Hover tint of grid rows, over any surface.
+    pub fn hover_tint() -> Color32 {
+        palette().hover_tint
+    }
+    /// Text of a disabled primary button.
+    pub fn on_primary_disabled() -> Color32 {
+        palette().on_primary_disabled
+    }
+
+    /// A colour from the game data made readable on the current surfaces.
+    ///
+    /// Game strings colour their text for the game's dark tooltips. On the
+    /// light palette a colour too pale against the panel is darkened, keeping
+    /// its hue, until it reaches a 4.5:1 contrast ratio.
+    pub fn readable(color: Color32) -> Color32 {
+        if !is_light() {
+            return color;
+        }
+        let background = panel_alt();
+        let mut adjusted = color;
+        for _ in 0..20 {
+            if contrast(adjusted, background) >= 4.5 {
+                break;
+            }
+            let [r, g, b, a] = adjusted.to_srgba_unmultiplied();
+            let darker = |c: u8| (f32::from(c) * 0.85) as u8;
+            adjusted = Color32::from_rgba_unmultiplied(darker(r), darker(g), darker(b), a);
+        }
+        adjusted
+    }
+
+    /// WCAG contrast ratio of two opaque colours.
+    pub fn contrast(a: Color32, b: Color32) -> f32 {
+        let (la, lb) = (luminance(a), luminance(b));
+        (la.max(lb) + 0.05) / (la.min(lb) + 0.05)
+    }
+
+    fn luminance(color: Color32) -> f32 {
+        let channel = |c: u8| {
+            let c = f32::from(c) / 255.0;
+            if c <= 0.039_28 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
+        };
+        let [r, g, b, _] = color.to_srgba_unmultiplied();
+        0.2126 * channel(r) + 0.7152 * channel(g) + 0.0722 * channel(b)
+    }
 }
 
 /// Spacing grid. No other spacing values are used anywhere.
@@ -124,8 +340,8 @@ pub fn caption() -> FontId {
 /// A rounded container for a section of the window.
 pub fn card() -> egui::Frame {
     egui::Frame::new()
-        .fill(color::PANEL_BG)
-        .stroke(Stroke::new(1.0, color::BORDER))
+        .fill(color::panel_bg())
+        .stroke(Stroke::new(1.0, color::border()))
         .corner_radius(CornerRadius::same(CARD_RADIUS))
         .inner_margin(Margin::same(space::MD as i8))
 }
@@ -133,16 +349,36 @@ pub fn card() -> egui::Frame {
 /// A recessed area inside a card or dialog.
 pub fn well() -> egui::Frame {
     egui::Frame::new()
-        .fill(color::INPUT_BG)
-        .stroke(Stroke::new(1.0, color::BORDER))
+        .fill(color::input_bg())
+        .stroke(Stroke::new(1.0, color::border()))
         .corner_radius(CornerRadius::same(RADIUS))
         .inner_margin(Margin::same(space::XS as i8))
 }
 
-/// Applies fonts and style to the whole application.
+/// Applies fonts and the dark style to the whole application; [`follow`]
+/// then switches to the configured theme.
 pub fn apply(ctx: &egui::Context) {
     ctx.set_fonts(fonts());
-    ctx.set_theme(egui::Theme::Dark);
+    set_light(ctx, false);
+}
+
+/// Switches palette and style when the configured theme, or the system's
+/// when the choice is [`ThemeChoice::System`], no longer matches. Cheap
+/// enough to call every frame.
+pub fn follow(ctx: &egui::Context, choice: ThemeChoice) {
+    let light = match choice {
+        ThemeChoice::Dark => false,
+        ThemeChoice::Light => true,
+        ThemeChoice::System => ctx.system_theme() == Some(egui::Theme::Light),
+    };
+    if light != color::is_light() {
+        set_light(ctx, light);
+    }
+}
+
+fn set_light(ctx: &egui::Context, light: bool) {
+    color::set_light(light);
+    ctx.set_theme(if light { egui::Theme::Light } else { egui::Theme::Dark });
     ctx.all_styles_mut(apply_style);
 }
 
@@ -172,56 +408,56 @@ fn apply_style(style: &mut egui::Style) {
 
     let radius = CornerRadius::same(RADIUS);
     let visuals = &mut style.visuals;
-    *visuals = egui::Visuals::dark();
-    visuals.override_text_color = Some(color::TEXT);
-    visuals.weak_text_color = Some(color::TEXT_MUTED);
-    visuals.panel_fill = color::WINDOW_BG;
-    visuals.window_fill = color::PANEL_BG;
-    visuals.window_stroke = Stroke::new(1.0, color::CONTROL_BORDER);
+    *visuals = if color::is_light() { egui::Visuals::light() } else { egui::Visuals::dark() };
+    visuals.override_text_color = Some(color::text());
+    visuals.weak_text_color = Some(color::text_muted());
+    visuals.panel_fill = color::window_bg();
+    visuals.window_fill = color::panel_bg();
+    visuals.window_stroke = Stroke::new(1.0, color::control_border());
     visuals.window_corner_radius = CornerRadius::same(CARD_RADIUS);
     visuals.menu_corner_radius = CornerRadius::same(CARD_RADIUS);
-    visuals.extreme_bg_color = color::CONTROL_BG;
-    visuals.text_edit_bg_color = Some(color::CONTROL_BG);
-    visuals.faint_bg_color = color::ROW_STRIPE;
-    visuals.code_bg_color = color::INPUT_BG;
-    visuals.hyperlink_color = color::ACCENT_BRIGHT;
-    visuals.warn_fg_color = color::WARNING;
-    visuals.error_fg_color = color::DANGER;
-    visuals.selection.bg_fill = color::ROW_SELECTED;
-    visuals.selection.stroke = Stroke::new(1.0, color::BORDER_FOCUS);
+    visuals.extreme_bg_color = color::control_bg();
+    visuals.text_edit_bg_color = Some(color::control_bg());
+    visuals.faint_bg_color = color::row_stripe();
+    visuals.code_bg_color = color::input_bg();
+    visuals.hyperlink_color = color::accent_bright();
+    visuals.warn_fg_color = color::warning();
+    visuals.error_fg_color = color::danger();
+    visuals.selection.bg_fill = color::row_selected();
+    visuals.selection.stroke = Stroke::new(1.0, color::border_focus());
 
     let widgets = &mut visuals.widgets;
-    widgets.noninteractive.bg_fill = color::PANEL_BG;
-    widgets.noninteractive.weak_bg_fill = color::PANEL_BG;
-    widgets.noninteractive.bg_stroke = Stroke::new(1.0, color::BORDER);
-    widgets.noninteractive.fg_stroke = Stroke::new(1.0, color::TEXT);
+    widgets.noninteractive.bg_fill = color::panel_bg();
+    widgets.noninteractive.weak_bg_fill = color::panel_bg();
+    widgets.noninteractive.bg_stroke = Stroke::new(1.0, color::border());
+    widgets.noninteractive.fg_stroke = Stroke::new(1.0, color::text());
     widgets.noninteractive.corner_radius = radius;
 
-    widgets.inactive.bg_fill = color::CONTROL_BG;
-    widgets.inactive.weak_bg_fill = color::CONTROL_BG;
-    widgets.inactive.bg_stroke = Stroke::new(1.0, color::CONTROL_BORDER);
-    widgets.inactive.fg_stroke = Stroke::new(1.0, color::TEXT);
+    widgets.inactive.bg_fill = color::control_bg();
+    widgets.inactive.weak_bg_fill = color::control_bg();
+    widgets.inactive.bg_stroke = Stroke::new(1.0, color::control_border());
+    widgets.inactive.fg_stroke = Stroke::new(1.0, color::text());
     widgets.inactive.corner_radius = radius;
     widgets.inactive.expansion = 0.0;
 
-    widgets.hovered.bg_fill = color::CONTROL_HOVER;
-    widgets.hovered.weak_bg_fill = color::CONTROL_HOVER;
-    widgets.hovered.bg_stroke = Stroke::new(1.0, color::BORDER_STRONG);
-    widgets.hovered.fg_stroke = Stroke::new(1.0, color::TEXT);
+    widgets.hovered.bg_fill = color::control_hover();
+    widgets.hovered.weak_bg_fill = color::control_hover();
+    widgets.hovered.bg_stroke = Stroke::new(1.0, color::border_strong());
+    widgets.hovered.fg_stroke = Stroke::new(1.0, color::text());
     widgets.hovered.corner_radius = radius;
     widgets.hovered.expansion = 0.0;
 
-    widgets.active.bg_fill = color::CONTROL_PRESSED;
-    widgets.active.weak_bg_fill = color::CONTROL_PRESSED;
-    widgets.active.bg_stroke = Stroke::new(1.0, color::BORDER_FOCUS);
-    widgets.active.fg_stroke = Stroke::new(1.0, color::TEXT);
+    widgets.active.bg_fill = color::control_pressed();
+    widgets.active.weak_bg_fill = color::control_pressed();
+    widgets.active.bg_stroke = Stroke::new(1.0, color::border_focus());
+    widgets.active.fg_stroke = Stroke::new(1.0, color::text());
     widgets.active.corner_radius = radius;
     widgets.active.expansion = 0.0;
 
-    widgets.open.bg_fill = color::CONTROL_HOVER;
-    widgets.open.weak_bg_fill = color::CONTROL_HOVER;
-    widgets.open.bg_stroke = Stroke::new(1.0, color::BORDER_STRONG);
-    widgets.open.fg_stroke = Stroke::new(1.0, color::TEXT);
+    widgets.open.bg_fill = color::control_hover();
+    widgets.open.weak_bg_fill = color::control_hover();
+    widgets.open.bg_stroke = Stroke::new(1.0, color::border_strong());
+    widgets.open.fg_stroke = Stroke::new(1.0, color::text());
     widgets.open.corner_radius = radius;
     widgets.open.expansion = 0.0;
 }
@@ -265,4 +501,32 @@ pub fn window_icon() -> Option<egui::IconData> {
     let image = image::load_from_memory(include_bytes!("../../../assets/Logo.ico")).ok()?.into_rgba8();
     let (width, height) = image.dimensions();
     Some(egui::IconData { rgba: image.into_raw(), width, height })
+}
+
+#[cfg(test)]
+mod tests {
+    use eframe::egui::Color32;
+
+    use super::color;
+
+    #[test]
+    fn game_colours_stay_readable_on_the_light_palette() {
+        let pale = [Color32::from_rgb(0xFF, 0xFF, 0x00), Color32::from_rgb(0xF8, 0x71, 0x6B), Color32::WHITE];
+        color::set_light(true);
+        let background = color::panel_alt();
+        for colour in pale {
+            let shown = color::readable(colour);
+            assert!(color::contrast(shown, background) >= 4.5, "{colour:?} -> {shown:?}");
+        }
+        // A colour already dark enough is left alone.
+        let dark_red = Color32::from_rgb(0x80, 0x00, 0x00);
+        assert_eq!(color::readable(dark_red), dark_red);
+        // Text and accents of the light palette pass the same bar.
+        for text in [color::text(), color::text_muted(), color::accent_bright(), color::danger(), color::success()] {
+            assert!(color::contrast(text, color::panel_bg()) >= 4.5, "{text:?}");
+        }
+        color::set_light(false);
+        assert_eq!(color::readable(Color32::WHITE), Color32::WHITE, "dark theme keeps game colours");
+        assert_eq!(color::text(), Color32::from_rgb(0xE8, 0xEB, 0xF0), "dark palette unchanged");
+    }
 }

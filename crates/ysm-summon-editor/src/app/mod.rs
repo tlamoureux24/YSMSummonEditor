@@ -316,6 +316,7 @@ impl EditorApp {
 impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
+        theme::follow(&ctx, self.state.settings.theme);
 
         self.textures.poll();
         if !self.worker.is_alive() && !std::mem::replace(&mut self.worker_failure_reported, true) {
@@ -354,7 +355,7 @@ impl eframe::App for EditorApp {
             let mut view = ViewContext { state: &self.state, textures: &mut self.textures, actions: &mut actions };
             // Every card is separated from its neighbours and the window edge by the same gap.
             let gap = space::SM as i8;
-            let frame = egui::Frame::new().fill(color::WINDOW_BG).inner_margin(Margin {
+            let frame = egui::Frame::new().fill(color::window_bg()).inner_margin(Margin {
                 left: gap,
                 right: gap,
                 top: 2,

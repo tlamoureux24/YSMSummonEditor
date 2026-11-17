@@ -14,10 +14,10 @@ const BAR_HEIGHT: f32 = 24.0;
 
 pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
     let state = view.state;
-    let frame = egui::Frame::new().fill(color::WINDOW_BG).inner_margin(Margin::symmetric(space::MD as i8, 4));
+    let frame = egui::Frame::new().fill(color::window_bg()).inner_margin(Margin::symmetric(space::MD as i8, 4));
     egui::Panel::bottom("status-bar").frame(frame).show_separator_line(false).show(ui, |ui| {
         let top = ui.max_rect().top() - 4.0;
-        ui.painter().hline(ui.ctx().content_rect().x_range(), top, Stroke::new(1.0, color::BORDER));
+        ui.painter().hline(ui.ctx().content_rect().x_range(), top, Stroke::new(1.0, color::border()));
 
         ui.horizontal(|ui| {
             ui.set_height(BAR_HEIGHT);
@@ -41,34 +41,36 @@ fn connection(ui: &mut Ui, view: &mut ViewContext<'_>) {
     let state = view.state;
     let (icon, text, tint, detail) = match &state.connection {
         ConnectionStatus::Connected(server) => {
-            (icons::CONNECTION, state.settings.database.display_target(), color::SUCCESS, server.clone())
+            (icons::CONNECTION, state.settings.database.display_target(), color::success(), server.clone())
         }
         ConnectionStatus::Demo => (
             icons::DATABASE,
             "Demo data".to_owned(),
-            color::WARNING,
+            color::warning(),
             "Built-in sample data; start without --demo to use a database.".to_owned(),
         ),
-        ConnectionStatus::Connecting => (icons::CONNECTION, "Connecting…".to_owned(), color::TEXT_MUTED, String::new()),
+        ConnectionStatus::Connecting => {
+            (icons::CONNECTION, "Connecting…".to_owned(), color::text_muted(), String::new())
+        }
         ConnectionStatus::Failed(error) => {
-            (icons::NO_CONNECTION, "Connection failed".to_owned(), color::DANGER, error.clone())
+            (icons::NO_CONNECTION, "Connection failed".to_owned(), color::danger(), error.clone())
         }
         ConnectionStatus::Lost(error) => (
             icons::NO_CONNECTION,
             "Connection lost".to_owned(),
-            color::DANGER,
+            color::danger(),
             format!("{error}\n\nThe next request reconnects automatically."),
         ),
         ConnectionStatus::NotConfigured => (
             icons::NO_CONNECTION,
             "Database not configured".to_owned(),
-            color::WARNING,
+            color::warning(),
             "Open Settings to set up the connection.".to_owned(),
         ),
     };
 
     if state.connection.can_reconnect() {
-        let reconnect = egui::Button::new(item(icons::REFRESH, "Reconnect", color::TEXT)).small();
+        let reconnect = egui::Button::new(item(icons::REFRESH, "Reconnect", color::text())).small();
         if ui.add(reconnect).clicked() {
             view.actions.push(Action::Reconnect);
         }
@@ -86,13 +88,13 @@ fn assets(ui: &mut Ui, view: &ViewContext<'_>) {
     let state = view.state;
     match state.asset_count {
         Some(count) => {
-            let tint = if count == 0 { color::WARNING } else { color::TEXT_MUTED };
+            let tint = if count == 0 { color::warning() } else { color::text_muted() };
             ui.label(item(icons::IMAGES, &format!("{count} images"), tint))
                 .on_hover_text(format!("Dump folder: {}", state.settings.dump_folder_path));
         }
         None => {
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
-            ui.label(item(icons::IMAGES, "Indexing images…", color::TEXT_MUTED));
+            ui.label(item(icons::IMAGES, "Indexing images…", color::text_muted()));
         }
     }
 }

@@ -18,9 +18,9 @@ pub enum MessageKind {
 impl MessageKind {
     fn icon(self) -> (&'static str, Color32) {
         match self {
-            MessageKind::Question => (icons::QUESTION, color::ACCENT_BRIGHT),
-            MessageKind::Warning => (icons::WARNING, color::WARNING),
-            MessageKind::Error => (icons::ERROR, color::DANGER),
+            MessageKind::Question => (icons::QUESTION, color::accent_bright()),
+            MessageKind::Warning => (icons::WARNING, color::warning()),
+            MessageKind::Error => (icons::ERROR, color::danger()),
         }
     }
 }
@@ -109,7 +109,7 @@ impl MessageDialog {
                         ui,
                         |ui| {
                             for item in &self.items {
-                                ui.label(RichText::new(format!("•  {item}")).color(color::TEXT_MUTED));
+                                ui.label(RichText::new(format!("•  {item}")).color(color::text_muted()));
                             }
                         },
                     );
@@ -122,7 +122,7 @@ impl MessageDialog {
                         ui,
                         |ui| {
                             ui.add(
-                                egui::Label::new(RichText::new(details).monospace().color(color::TEXT_MUTED)).wrap(),
+                                egui::Label::new(RichText::new(details).monospace().color(color::text_muted())).wrap(),
                             );
                         },
                     );

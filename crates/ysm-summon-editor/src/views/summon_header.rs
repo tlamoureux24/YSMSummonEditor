@@ -61,7 +61,7 @@ fn placeholder(ui: &mut Ui, loading: bool) {
     } else {
         ui.horizontal(|ui| {
             ui.set_height(theme::ICON_SIZE);
-            ui.label(RichText::new("No selection").font(theme::bold(theme::TITLE_SIZE)).color(color::TEXT_MUTED));
+            ui.label(RichText::new("No selection").font(theme::bold(theme::TITLE_SIZE)).color(color::text_muted()));
         });
         ui.label(widgets::muted("Pick a summon from the list to load its evolution chain and skill trees."));
     }
@@ -125,7 +125,7 @@ fn evolution_chain(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionCha
                 Align2::CENTER_CENTER,
                 icons::ARROW_RIGHT,
                 egui::FontId::proportional(theme::GLYPH_SIZE),
-                color::TEXT_FAINT,
+                color::text_faint(),
             );
         }
 
@@ -135,7 +135,7 @@ fn evolution_chain(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionCha
             ui.painter().rect_stroke(
                 icon_rect.expand(2.0),
                 CornerRadius::same(theme::RADIUS),
-                Stroke::new(2.0, color::BORDER_FOCUS),
+                Stroke::new(2.0, color::border_focus()),
                 StrokeKind::Outside,
             );
         }
@@ -144,7 +144,7 @@ fn evolution_chain(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionCha
             Align2::CENTER_BOTTOM,
             summon.summon_id.to_string(),
             theme::caption(),
-            if active { color::TEXT } else { color::TEXT_MUTED },
+            if active { color::text() } else { color::text_muted() },
         );
 
         let response = ui

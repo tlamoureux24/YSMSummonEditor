@@ -44,9 +44,9 @@ pub fn primary_button(ui: &mut Ui, icon: &str, text: &str) -> Response {
 
 pub fn primary_button_enabled(ui: &mut Ui, enabled: bool, icon: &str, text: &str) -> Response {
     let (fill, tint) = if enabled {
-        (color::PRIMARY, Color32::WHITE)
+        (color::primary(), Color32::WHITE)
     } else {
-        (color::PRIMARY_DISABLED, Color32::from_white_alpha(115))
+        (color::primary_disabled(), color::on_primary_disabled())
     };
     let label = RichText::new(icon_text(icon, text)).color(tint);
     let button = egui::Button::new(label)
@@ -60,7 +60,7 @@ pub fn primary_button_enabled(ui: &mut Ui, enabled: bool, icon: &str, text: &str
 pub fn danger_button(ui: &mut Ui, icon: &str, text: &str) -> Response {
     let label = RichText::new(icon_text(icon, text)).color(Color32::WHITE);
     let button = egui::Button::new(label)
-        .fill(color::DANGER_BG)
+        .fill(color::danger_bg())
         .stroke(Stroke::NONE)
         .min_size(Vec2::new(theme::BUTTON_MIN_WIDTH, theme::CONTROL_HEIGHT));
     ui.add(button)
@@ -114,14 +114,14 @@ pub fn toggle(ui: &mut Ui, on: &mut bool, label: &str) -> Response {
 
     if ui.is_rect_visible(rect) {
         let how_on = ui.ctx().animate_bool_with_time(response.id, *on, 0.12);
-        let track = if *on { color::PRIMARY } else { color::CONTROL_HOVER };
+        let track = if *on { color::primary() } else { color::control_hover() };
         let radius = rect.height() / 2.0;
         ui.painter().rect_filled(rect, radius, track);
         if !*on {
-            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::CONTROL_BORDER), StrokeKind::Inside);
+            ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::control_border()), StrokeKind::Inside);
         }
         let knob_x = egui::lerp((rect.left() + 10.0)..=(rect.right() - 10.0), how_on);
-        let knob = if *on { Color32::WHITE } else { color::TEXT_MUTED };
+        let knob = if *on { Color32::WHITE } else { color::text_muted() };
         ui.painter().circle_filled(egui::pos2(knob_x, rect.center().y), 7.0, knob);
     }
     response
@@ -139,7 +139,7 @@ pub fn segmented(ui: &mut Ui, segments: &[Segment<'_>], selected: usize, segment
     let size = Vec2::new(segment_width * segments.len() as f32, theme::CONTROL_HEIGHT);
     let (rect, _) = ui.allocate_exact_size(size, Sense::hover());
     let radius = CornerRadius::same(theme::RADIUS);
-    ui.painter().rect(rect, radius, color::CONTROL_BG, Stroke::new(1.0, color::CONTROL_BORDER), StrokeKind::Inside);
+    ui.painter().rect(rect, radius, color::control_bg(), Stroke::new(1.0, color::control_border()), StrokeKind::Inside);
 
     let mut clicked = None;
     for (index, segment) in segments.iter().enumerate() {
@@ -156,11 +156,11 @@ pub fn segmented(ui: &mut Ui, segments: &[Segment<'_>], selected: usize, segment
         let inner = segment_rect.shrink(3.0);
         let inner_radius = CornerRadius::same(theme::RADIUS - 2);
         if is_selected {
-            ui.painter().rect_filled(inner, inner_radius, color::PRIMARY);
+            ui.painter().rect_filled(inner, inner_radius, color::primary());
         } else if response.hovered() {
-            ui.painter().rect_filled(inner, inner_radius, color::CONTROL_HOVER);
+            ui.painter().rect_filled(inner, inner_radius, color::control_hover());
         }
-        let tint = if is_selected { Color32::WHITE } else { color::TEXT_MUTED };
+        let tint = if is_selected { Color32::WHITE } else { color::text_muted() };
         let text =
             if segment.icon.is_empty() { segment.label.to_owned() } else { icon_text(segment.icon, segment.label) };
         ui.painter().text(segment_rect.center(), egui::Align2::CENTER_CENTER, text, theme::body(), tint);
@@ -206,20 +206,20 @@ pub fn tab_strip(ui: &mut Ui, tabs: &[Tab], selected: usize) -> Option<usize> {
                     ui.painter().rect(
                         rect,
                         radius,
-                        color::ACCENT_SUBTLE,
-                        Stroke::new(1.0, color::BORDER_FOCUS.gamma_multiply(0.55)),
+                        color::accent_subtle(),
+                        Stroke::new(1.0, color::border_focus().gamma_multiply(0.55)),
                         StrokeKind::Inside,
                     );
                 } else if response.hovered() {
-                    ui.painter().rect_filled(rect, radius, color::CONTROL_HOVER);
+                    ui.painter().rect_filled(rect, radius, color::control_hover());
                 } else {
-                    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::BORDER), StrokeKind::Inside);
+                    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::border()), StrokeKind::Inside);
                 }
 
                 let (title_color, subtitle_color) = match (is_selected, tab.enabled) {
-                    (true, _) => (color::TEXT, color::ACCENT_BRIGHT),
-                    (false, true) => (color::TEXT, color::TEXT_MUTED),
-                    (false, false) => (color::TEXT_DISABLED, color::TEXT_DISABLED),
+                    (true, _) => (color::text(), color::accent_bright()),
+                    (false, true) => (color::text(), color::text_muted()),
+                    (false, false) => (color::text_disabled(), color::text_disabled()),
                 };
                 let mut job = LayoutJob::default();
                 let title_font = if is_selected { theme::bold(theme::BODY_SIZE) } else { theme::body() };
@@ -242,7 +242,7 @@ pub fn tab_strip(ui: &mut Ui, tabs: &[Tab], selected: usize) -> Option<usize> {
                 ui.painter().galley(egui::pos2(left, rect.center().y - text_size.y / 2.0), galley, title_color);
                 if tab.dirty {
                     let center = egui::pos2(left + text_size.x + space::SM + dot_radius, rect.center().y);
-                    ui.painter().circle_filled(center, dot_radius, color::DIRTY_MARK);
+                    ui.painter().circle_filled(center, dot_radius, color::dirty_mark());
                 }
             }
 
@@ -293,12 +293,12 @@ pub fn section_title(ui: &mut Ui, text: &str) -> Response {
 
 /// Secondary text.
 pub fn muted(text: impl Into<String>) -> RichText {
-    RichText::new(text).color(color::TEXT_MUTED)
+    RichText::new(text).color(color::text_muted())
 }
 
 /// Secondary text at caption size.
 pub fn caption(text: impl Into<String>) -> RichText {
-    RichText::new(text).color(color::TEXT_MUTED).size(theme::CAPTION_SIZE)
+    RichText::new(text).color(color::text_muted()).size(theme::CAPTION_SIZE)
 }
 
 /// A row of exactly the control height, with its content centred vertically.
@@ -315,7 +315,7 @@ pub fn control_row(ui: &mut Ui, left: impl FnOnce(&mut Ui), right: impl FnOnce(&
 /// A hairline with the standard gap above and below it.
 pub fn divider(ui: &mut Ui) {
     let (rect, _) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 1.0), Sense::hover());
-    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, color::BORDER));
+    ui.painter().hline(rect.x_range(), rect.center().y, Stroke::new(1.0, color::border()));
 }
 
 // ---- content ---------------------------------------------------------------
@@ -334,7 +334,7 @@ pub fn paint_game_icon(ui: &Ui, texture: TextureId, rect: Rect, tint: Color32) {
     }
     let radius = CornerRadius::same(4);
     egui::Image::from_texture((texture, rect.size())).corner_radius(radius).tint(tint).paint_at(ui, rect);
-    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::CONTROL_BORDER), StrokeKind::Inside);
+    ui.painter().rect_stroke(rect, radius, Stroke::new(1.0, color::control_border()), StrokeKind::Inside);
 }
 
 /// A small rounded label, e.g. `RND[301]`.
@@ -366,10 +366,10 @@ pub fn empty_state(ui: &mut Ui, icon: &str, title: &str, hint: &str) {
     ui.vertical_centered(|ui| {
         ui.set_max_width(ui.available_width().min(360.0));
         ui.add_space((ui.available_height() * 0.25).clamp(space::MD, 120.0));
-        ui.label(RichText::new(icon).size(32.0).color(color::TEXT_FAINT));
-        ui.label(RichText::new(title).font(theme::bold(theme::SECTION_SIZE)).color(color::TEXT_MUTED));
+        ui.label(RichText::new(icon).size(32.0).color(color::text_faint()));
+        ui.label(RichText::new(title).font(theme::bold(theme::SECTION_SIZE)).color(color::text_muted()));
         if !hint.is_empty() {
-            ui.label(RichText::new(hint).color(color::TEXT_FAINT));
+            ui.label(RichText::new(hint).color(color::text_faint()));
         }
     });
 }
@@ -416,10 +416,10 @@ pub fn header_cell(ui: &mut Ui, text: &str, tooltip: &str, align: ColumnAlign) {
 /// Dimmed text for zero values, so the meaningful numbers of a grid stand out.
 pub fn value_color(value: i32, changed: bool) -> Color32 {
     if changed {
-        color::DIRTY_MARK
+        color::dirty_mark()
     } else if value == 0 {
-        color::TEXT_FAINT
+        color::text_faint()
     } else {
-        color::TEXT
+        color::text()
     }
 }

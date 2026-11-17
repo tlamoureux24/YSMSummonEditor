@@ -1,6 +1,6 @@
 //! Skill tree card: tree tabs, row actions and the editable grid.
 
-use eframe::egui::{self, Align, Color32, Layout, RichText, Sense, Ui};
+use eframe::egui::{self, Align, Layout, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use ysm_core::model::{EntryField, TREE_SLOTS};
 use ysm_core::session::{EntryRow, TreeRef, TreeState};
@@ -160,7 +160,7 @@ fn action_bar(ui: &mut Ui, view: &mut ViewContext<'_>, tree: Option<&TreeState>)
                 ui.label(
                     RichText::new(icon_text(icons::WARNING, "Shared in chain"))
                         .size(theme::CAPTION_SIZE)
-                        .color(color::WARNING),
+                        .color(color::warning()),
                 )
                 .on_hover_text(note.as_str());
             }
@@ -174,7 +174,7 @@ fn grid(ui: &mut Ui, view: &mut ViewContext<'_>, tree: &TreeState) {
     egui::ScrollArea::horizontal().id_salt(("tree-scroll", tree.tree)).auto_shrink(false).show(ui, |ui| {
         ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
         // A light tint, so hovering never hides the colour of a changed row.
-        ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_white_alpha(8);
+        ui.visuals_mut().widgets.hovered.bg_fill = color::hover_tint();
 
         let mut table = TableBuilder::new(ui)
             .id_salt(("tree-grid", tree.tree))
@@ -229,7 +229,7 @@ fn grid_row(
     let state = view.state;
     let session = &state.session;
     let selected = state.selected_row == Some(row.uid);
-    let dirty_fill = (row.is_dirty() && !selected).then_some(color::ROW_DIRTY);
+    let dirty_fill = (row.is_dirty() && !selected).then_some(color::row_dirty());
     let skill_id = row.entry.skill_id;
     let display = session.skill_display(skill_id);
     table_row.set_selected(selected);
@@ -261,17 +261,17 @@ fn grid_row(
     // Skill name and random group badge
     let (_, name_response) = table_row.col(|ui| {
         let (name, tint) = if skill_id <= 0 {
-            ("New skill".to_owned(), color::TEXT_FAINT)
+            ("New skill".to_owned(), color::text_faint())
         } else if display.is_none() {
-            (session.skill_name(skill_id), color::WARNING)
+            (session.skill_name(skill_id), color::warning())
         } else {
-            (session.skill_name(skill_id), color::TEXT)
+            (session.skill_name(skill_id), color::text())
         };
         // The badge takes its place at the right edge first; the name truncates in what is left.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             let group_id = row.entry.skill_group_id;
             if group_id > 0 {
-                widgets::badge(ui, &format!("RND[{group_id}]"), color::ACCENT_BRIGHT)
+                widgets::badge(ui, &format!("RND[{group_id}]"), color::accent_bright())
                     .on_hover_ui(|ui| game_tooltip::random_group(ui, session, group_id));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
@@ -310,7 +310,7 @@ fn number_cell(
     let id = egui::Id::new(("tree-cell", row.uid, field));
 
     // Dimmed zeros would vanish on the selection colour.
-    let tint = if selected && !changed && value == 0 { color::TEXT_MUTED } else { value_color(value, changed) };
+    let tint = if selected && !changed && value == 0 { color::text_muted() } else { value_color(value, changed) };
     let output = int_cell(ui, id, value, tint);
     select(&output.response, actions);
     if let Some(value) = output.committed {

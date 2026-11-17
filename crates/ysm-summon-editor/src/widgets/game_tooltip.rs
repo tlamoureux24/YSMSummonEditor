@@ -22,7 +22,7 @@ pub fn layout(markup: &str, wrap_width: f32) -> LayoutJob {
             .color_hex
             .as_deref()
             .and_then(tooltip::parse_hex_color)
-            .map_or(color::TEXT, |[r, g, b, a]| Color32::from_rgba_unmultiplied(r, g, b, a));
+            .map_or(color::text(), |[r, g, b, a]| color::readable(Color32::from_rgba_unmultiplied(r, g, b, a)));
         let size = segment.font_size.map_or(BODY_SIZE, |size| size.clamp(10.0, 26.0));
         let family = if segment.bold { theme::bold_family() } else { FontFamily::Proportional };
         let format = TextFormat {
@@ -43,7 +43,7 @@ pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
     let name = display.map_or_else(|| format!("Skill {skill_id}"), |d| d.skill_name.clone());
     ui.horizontal(|ui| {
         ui.label(RichText::new(name).font(theme::bold(theme::BODY_SIZE)));
-        ui.label(RichText::new(format!("#{skill_id}")).color(color::TEXT_MUTED));
+        ui.label(RichText::new(format!("#{skill_id}")).color(color::text_muted()));
     });
 
     match display.and_then(|d| d.tooltip_markup.as_deref()).filter(|markup| !markup.trim().is_empty()) {
@@ -52,7 +52,7 @@ pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
             ui.label(layout(markup, TOOLTIP_WIDTH));
         }
         None if display.is_none() => {
-            ui.label(RichText::new("This skill does not exist in SkillResource.").color(color::WARNING));
+            ui.label(RichText::new("This skill does not exist in SkillResource.").color(color::warning()));
         }
         None => {}
     }
@@ -64,10 +64,10 @@ pub fn random_group(ui: &mut Ui, session: &EditSession, group_id: i32) {
     ui.label(RichText::new(format!("Random group {group_id}")).font(theme::bold(theme::BODY_SIZE)));
 
     let (state_text, tint) = match session.group_state(group_id) {
-        GroupState::Pending => ("Staged — will be written on save", color::DIRTY_MARK),
-        GroupState::Loaded => ("Loaded from the database", color::TEXT_MUTED),
-        GroupState::MissingInDb => ("Missing in SummonRandomSkillResource", color::WARNING),
-        GroupState::Loading => ("Loading…", color::TEXT_MUTED),
+        GroupState::Pending => ("Staged — will be written on save", color::dirty_mark()),
+        GroupState::Loaded => ("Loaded from the database", color::text_muted()),
+        GroupState::MissingInDb => ("Missing in SummonRandomSkillResource", color::warning()),
+        GroupState::Loading => ("Loading…", color::text_muted()),
     };
     ui.label(RichText::new(state_text).color(tint));
 
@@ -78,14 +78,14 @@ pub fn random_group(ui: &mut Ui, session: &EditSession, group_id: i32) {
 
 fn candidates(ui: &mut Ui, session: &EditSession, group: &RandomSkillGroup) {
     ui.separator();
-    ui.label(RichText::new(format!("UseCode: {}", group.use_code())).color(color::TEXT_MUTED));
+    ui.label(RichText::new(format!("UseCode: {}", group.use_code())).color(color::text_muted()));
     if group.skill_ids().is_empty() {
-        ui.label(RichText::new("No candidate skills.").color(color::TEXT_MUTED));
+        ui.label(RichText::new("No candidate skills.").color(color::text_muted()));
         return;
     }
     egui::Grid::new(("group-candidates", group.group_id)).num_columns(2).spacing([10.0, 2.0]).show(ui, |ui| {
         for skill_id in group.skill_ids() {
-            ui.label(RichText::new(skill_id.to_string()).color(color::TEXT_MUTED));
+            ui.label(RichText::new(skill_id.to_string()).color(color::text_muted()));
             ui.label(session.skill_name(*skill_id));
             ui.end_row();
         }

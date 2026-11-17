@@ -76,7 +76,7 @@ impl StatScalingDialog {
         let mut apply = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::STATS, color::ACCENT_BRIGHT, &title, 1184.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::STATS, color::accent_bright(), &title, 1184.0, |ui| {
             let snapshot = self.draft.snapshot();
             let result = scaling::calculate(&ScalingInput {
                 level: self.level,
@@ -207,14 +207,14 @@ impl StatScalingDialog {
 
             for row in &result.rows {
                 stat_name(ui, row.stat, false);
-                number(ui, row.base.to_string(), color::TEXT, false);
+                number(ui, row.base.to_string(), color::text(), false);
                 for stage in row.stage {
                     number(ui, stage.to_string(), dimmed(stage), false);
                 }
                 number(ui, row.bonus.to_string(), dimmed(row.bonus), false);
-                number(ui, row.final_raw.to_string(), color::TEXT, false);
-                number(ui, row.final_value.to_string(), color::TEXT, true);
-                number(ui, format!("+{}", row.delta), color::SUCCESS, false);
+                number(ui, row.final_raw.to_string(), color::text(), false);
+                number(ui, row.final_value.to_string(), color::text(), true);
+                number(ui, format!("+{}", row.delta), color::success(), false);
                 ui.end_row();
             }
         });
@@ -237,7 +237,13 @@ impl StatScalingDialog {
         let (rect, response) =
             ui.allocate_exact_size(Vec2::new(ui.available_width(), CHART_HEIGHT), Sense::click_and_drag());
         let painter = ui.painter_at(rect);
-        painter.rect(rect, theme::RADIUS, color::INPUT_BG, Stroke::new(1.0, color::BORDER), egui::StrokeKind::Inside);
+        painter.rect(
+            rect,
+            theme::RADIUS,
+            color::input_bg(),
+            Stroke::new(1.0, color::border()),
+            egui::StrokeKind::Inside,
+        );
 
         let plot = rect.shrink(space::MD);
         let max_value = self.curve.iter().flatten().copied().max().unwrap_or(1).max(1) as f32;
@@ -247,7 +253,7 @@ impl StatScalingDialog {
 
         // Where the second and third growth stages begin.
         for boundary in [50, 100] {
-            painter.vline(x_of(boundary), plot.y_range(), Stroke::new(1.0, color::BORDER));
+            painter.vline(x_of(boundary), plot.y_range(), Stroke::new(1.0, color::border()));
         }
         for stat in Stat::ALL {
             let points: Vec<egui::Pos2> = self
@@ -256,15 +262,15 @@ impl StatScalingDialog {
                 .enumerate()
                 .map(|(index, values)| egui::pos2(x_of(MIN_LEVEL + index as i32), y_of(values[stat.index()])))
                 .collect();
-            painter.line(points, Stroke::new(1.5, STAT_COLORS[stat.index()]));
+            painter.line(points, Stroke::new(1.5, color::readable(STAT_COLORS[stat.index()])));
         }
-        painter.vline(x_of(self.level), plot.y_range(), Stroke::new(1.0, color::TEXT));
+        painter.vline(x_of(self.level), plot.y_range(), Stroke::new(1.0, color::text()));
         painter.text(
             plot.left_top(),
             egui::Align2::LEFT_TOP,
             format!("Final stats by level · max {max_value:.0}"),
             theme::caption(),
-            color::TEXT_MUTED,
+            color::text_muted(),
         );
 
         // Clicking or dragging on the chart picks the level.
@@ -290,7 +296,7 @@ fn section_divider(ui: &mut Ui) {
     let rows = STAT_COUNT as f32 * (theme::CONTROL_HEIGHT + space::XS);
     let height = 44.0 + HEADER_HEIGHT + rows;
     let (rect, _) = ui.allocate_exact_size(Vec2::new(2.0 * SECTION_GAP + 1.0, height), Sense::hover());
-    ui.painter().vline(rect.center().x, rect.y_range(), Stroke::new(1.0, color::BORDER));
+    ui.painter().vline(rect.center().x, rect.y_range(), Stroke::new(1.0, color::border()));
 }
 
 /// Title and caption of a section; the same height in every section.
@@ -318,14 +324,14 @@ fn header(ui: &mut Ui, width: f32, title: &str, detail: &str, align: Align) -> e
         if !detail.is_empty() {
             ui.add(egui::Label::new(widgets::caption(detail)).extend().selectable(false));
         }
-        let title = RichText::new(title).size(theme::CAPTION_SIZE).color(color::TEXT_MUTED);
+        let title = RichText::new(title).size(theme::CAPTION_SIZE).color(color::text_muted());
         ui.add(egui::Label::new(title).extend().selectable(false));
     })
     .response
 }
 
 fn stat_name(ui: &mut Ui, stat: Stat, dirty: bool) {
-    let tint = if dirty { color::DIRTY_MARK } else { STAT_COLORS[stat.index()] };
+    let tint = if dirty { color::dirty_mark() } else { color::readable(STAT_COLORS[stat.index()]) };
     let text = RichText::new(stat.label()).font(theme::bold(theme::BODY_SIZE)).color(tint);
     ui.allocate_ui_with_layout(
         Vec2::new(STAT_COLUMN_WIDTH, theme::CONTROL_HEIGHT),
@@ -352,5 +358,5 @@ fn number(ui: &mut Ui, text: String, tint: Color32, emphasized: bool) {
 }
 
 fn dimmed(value: i32) -> Color32 {
-    if value == 0 { color::TEXT_FAINT } else { color::TEXT }
+    if value == 0 { color::text_faint() } else { color::text() }
 }

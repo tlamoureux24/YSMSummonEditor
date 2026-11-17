@@ -83,7 +83,7 @@ impl SkillSearch {
     /// The state of the search as a caption: a spinner, an error or the result count.
     pub fn status(&self, ui: &mut Ui) {
         if let Some(error) = &self.error {
-            ui.label(widgets::caption(format!("{}  Search failed", icons::ERROR)).color(color::DANGER))
+            ui.label(widgets::caption(format!("{}  Search failed", icons::ERROR)).color(color::danger()))
                 .on_hover_text(error.as_str());
         } else if self.awaiting.is_some() {
             ui.label(widgets::caption("Searching…"));
@@ -184,9 +184,9 @@ pub fn skill_row(
 
     let highlight = rect.shrink2(Vec2::new(0.0, 1.0));
     if selected {
-        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::ROW_SELECTED);
+        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::row_selected());
     } else if response.hovered() {
-        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::ROW_HOVER);
+        ui.painter().rect_filled(highlight, CornerRadius::same(theme::RADIUS), color::row_hover());
     }
 
     let mut left = rect.left() + space::SM;
@@ -198,7 +198,7 @@ pub fn skill_row(
             Align2::RIGHT_CENTER,
             slot.to_string(),
             theme::caption(),
-            color::TEXT_MUTED,
+            color::text_muted(),
         );
         left += column + space::SM;
     }
@@ -218,7 +218,7 @@ pub fn skill_row(
         Align2::LEFT_CENTER,
         &skill.skill_name,
         theme::body(),
-        if disabled { color::TEXT_DISABLED } else { color::TEXT },
+        if disabled { color::text_disabled() } else { color::text() },
     );
     let detail =
         if disabled { format!("{}  ·  already in the group", skill.skill_id) } else { skill.skill_id.to_string() };
@@ -227,7 +227,7 @@ pub fn skill_row(
         Align2::LEFT_CENTER,
         detail,
         theme::caption(),
-        if disabled { color::TEXT_DISABLED } else { color::TEXT_MUTED },
+        if disabled { color::text_disabled() } else { color::text_muted() },
     );
 
     response.on_hover_ui(|ui| game_tooltip::skill(ui, skill.skill_id, Some(skill)))

@@ -24,8 +24,8 @@ pub fn show(
     add_contents: impl FnOnce(&mut Ui),
 ) -> ModalOutcome {
     let frame = egui::Frame::popup(&ctx.global_style())
-        .fill(color::PANEL_BG)
-        .stroke(Stroke::new(1.0, color::CONTROL_BORDER))
+        .fill(color::panel_bg())
+        .stroke(Stroke::new(1.0, color::control_border()))
         .corner_radius(theme::CARD_RADIUS)
         .inner_margin(Margin::same(space::XL as i8));
 

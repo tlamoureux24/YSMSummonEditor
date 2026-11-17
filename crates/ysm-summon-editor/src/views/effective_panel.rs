@@ -1,6 +1,6 @@
 //! Effective skills card: the skills of the active evolution merged across its trees.
 
-use eframe::egui::{self, Align, Color32, Layout, Margin, RichText, Sense, Ui};
+use eframe::egui::{self, Align, Layout, Margin, RichText, Sense, Ui};
 use egui_extras::{Column, TableBuilder};
 use ysm_core::session::EffectiveRow;
 
@@ -14,7 +14,7 @@ use crate::widgets::{self, ColumnAlign, RowBand, game_tooltip, header_cell, icon
 pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
     // The left margin is the gap to the skill tree card.
     let frame =
-        egui::Frame::new().fill(color::WINDOW_BG).inner_margin(Margin { left: space::SM as i8, ..Margin::ZERO });
+        egui::Frame::new().fill(color::window_bg()).inner_margin(Margin { left: space::SM as i8, ..Margin::ZERO });
     egui::Panel::right("effective-skills")
         .frame(frame)
         .resizable(true)
@@ -33,7 +33,7 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
                 widgets::control_row(
                     ui,
                     |ui| {
-                        ui.label(RichText::new(icons::EFFECTIVE).size(theme::GLYPH_SIZE).color(color::TEXT_MUTED));
+                        ui.label(RichText::new(icons::EFFECTIVE).size(theme::GLYPH_SIZE).color(color::text_muted()));
                         widgets::section_title(ui, "Effective Skills");
                     },
                     |ui| {
@@ -74,7 +74,7 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
 
 fn grid(ui: &mut Ui, view: &mut ViewContext<'_>, stage: u8, rows: &[EffectiveRow]) {
     ui.spacing_mut().item_spacing = egui::Vec2::splat(space::XS);
-    ui.visuals_mut().widgets.hovered.bg_fill = Color32::from_white_alpha(8);
+    ui.visuals_mut().widgets.hovered.bg_fill = color::hover_tint();
 
     TableBuilder::new(ui)
         .id_salt(("effective-grid", stage))
@@ -119,7 +119,7 @@ fn grid_row(
     let session = &view.state.session;
     let key = (row.skill_id, row.lv);
     let selected = view.state.selected_effective == Some(key);
-    let dirty_fill = (row.is_dirty && !selected).then_some(color::ROW_DIRTY);
+    let dirty_fill = (row.is_dirty && !selected).then_some(color::row_dirty());
     let display = session.skill_display(row.skill_id);
     table_row.set_selected(selected);
 
@@ -141,7 +141,7 @@ fn grid_row(
     };
     let number = |ui: &mut Ui, value: i32| {
         // Dimmed zeros would vanish on the selection colour.
-        let tint = if selected && value == 0 { color::TEXT_MUTED } else { value_color(value, false) };
+        let tint = if selected && value == 0 { color::text_muted() } else { value_color(value, false) };
         ui.centered_and_justified(|ui| {
             ui.add(egui::Label::new(RichText::new(value.to_string()).color(tint)).selectable(false));
         });
@@ -161,11 +161,11 @@ fn grid_row(
     table_row.col(|ui| number(ui, row.skill_id));
 
     let (_, name_response) = table_row.col(|ui| {
-        let tint = if display.is_some() { color::TEXT } else { color::WARNING };
+        let tint = if display.is_some() { color::text() } else { color::warning() };
         // Badges and the merge count sit at the right edge; the name truncates in what is left.
         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
             for group_id in row.group_ids.iter().rev() {
-                widgets::badge(ui, &format!("RND[{group_id}]"), color::ACCENT_BRIGHT)
+                widgets::badge(ui, &format!("RND[{group_id}]"), color::accent_bright())
                     .on_hover_ui(|ui| game_tooltip::random_group(ui, session, *group_id));
             }
             if row.linked > 1 {
@@ -186,7 +186,7 @@ fn grid_row(
     for (is_min, value) in [(true, row.min_skill_lv), (false, row.max_skill_lv)] {
         table_row.col(|ui| {
             let id = egui::Id::new(("effective-cell", stage, key, is_min));
-            let tint = if selected && value == 0 { color::TEXT_MUTED } else { value_color(value, false) };
+            let tint = if selected && value == 0 { color::text_muted() } else { value_color(value, false) };
             let output = int_cell(ui, id, value, tint);
             select(&output.response, view.actions);
             if let Some(new_value) = output.committed {

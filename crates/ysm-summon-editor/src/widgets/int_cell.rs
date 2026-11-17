@@ -34,7 +34,7 @@ pub fn int_cell(ui: &mut Ui, id: egui::Id, value: i32, text_color: Color32) -> I
         ui.painter().rect_stroke(
             response.rect.expand(1.0),
             3.0,
-            Stroke::new(1.0, color::ACCENT_BRIGHT),
+            Stroke::new(1.0, color::accent_bright()),
             StrokeKind::Outside,
         );
     } else {

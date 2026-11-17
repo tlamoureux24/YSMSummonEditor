@@ -34,7 +34,7 @@ impl SkillPickerDialog {
         let mut picked = None;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::ADD_SKILL, color::ACCENT_BRIGHT, title, 520.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::ADD_SKILL, color::accent_bright(), title, 520.0, |ui| {
             widgets::control_row(
                 ui,
                 |ui| {

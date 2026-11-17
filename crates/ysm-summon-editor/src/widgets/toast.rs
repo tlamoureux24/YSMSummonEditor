@@ -29,10 +29,10 @@ impl ToastKind {
 
     fn tint(self) -> Color32 {
         match self {
-            ToastKind::Info => color::INFO,
-            ToastKind::Success => color::SUCCESS,
-            ToastKind::Warning => color::WARNING,
-            ToastKind::Error => color::DANGER,
+            ToastKind::Info => color::info(),
+            ToastKind::Success => color::success(),
+            ToastKind::Warning => color::warning(),
+            ToastKind::Error => color::danger(),
         }
     }
 
@@ -82,7 +82,7 @@ impl Toasts {
                     for (index, toast) in self.items.iter().enumerate().rev() {
                         let tint = toast.kind.tint();
                         let frame = egui::Frame::new()
-                            .fill(color::PANEL_ALT)
+                            .fill(color::panel_alt())
                             .stroke(Stroke::new(1.0, tint.gamma_multiply(0.7)))
                             .corner_radius(CornerRadius::same(theme::CARD_RADIUS))
                             .inner_margin(Margin::symmetric(12, 8));
