@@ -4,7 +4,7 @@
 //! one shared line, help text under the control it belongs to.
 
 use eframe::egui::{self, RichText, Ui};
-use ysm_data::AppSettings;
+use ysm_data::{AppSettings, DbProvider};
 
 use super::DialogContext;
 use crate::action::Action;
@@ -140,6 +140,28 @@ impl SettingsDialog {
         let database = &mut self.working.database;
         let mut edited = false;
 
+        widgets::form_row(ui, "Server type", |ui| {
+            let segments = DbProvider::ALL.map(|provider| widgets::Segment {
+                icon: icons::DATABASE,
+                label: provider.label(),
+                tooltip: match provider {
+                    DbProvider::Mssql => "Microsoft SQL Server",
+                    DbProvider::PostgreSql => "PostgreSQL; tables are found through the database's search_path",
+                },
+            });
+            let selected = DbProvider::ALL.iter().position(|p| *p == database.provider).unwrap_or(0);
+            if let Some(index) = widgets::segmented(ui, &segments, selected, 112.0) {
+                let provider = DbProvider::ALL[index];
+                if provider != database.provider {
+                    // Follow the default port unless the user typed another one.
+                    if self.port_text.trim() == database.provider.default_port().to_string() {
+                        self.port_text = provider.default_port().to_string();
+                    }
+                    database.provider = provider;
+                    edited = true;
+                }
+            }
+        });
         widgets::form_row(ui, "Server", |ui| {
             let field =
                 widgets::sized_text_field(&mut database.server, FIELD_WIDTH).hint_text("Host name or IP address");
@@ -165,13 +187,23 @@ impl SettingsDialog {
                 self.show_password = !self.show_password;
             }
         });
-        help(ui, "Stored in plain text in settings.json under %LOCALAPPDATA%\\YSMSummonEditor.");
-
-        widgets::form_row(ui, "Trust server certificate", |ui| {
-            edited |= widgets::toggle(ui, &mut database.trust_server_certificate, "Trust server certificate")
-                .on_hover_text("Accept the server's certificate without validating it; usual for a local server.")
-                .changed();
-        });
+        match database.provider {
+            DbProvider::Mssql => {
+                help(ui, "Stored in plain text in settings.json under %LOCALAPPDATA%\\YSMSummonEditor.");
+                widgets::form_row(ui, "Trust server certificate", |ui| {
+                    edited |= widgets::toggle(ui, &mut database.trust_server_certificate, "Trust server certificate")
+                        .on_hover_text(
+                            "Accept the server's certificate without validating it; usual for a local server.",
+                        )
+                        .changed();
+                });
+            }
+            DbProvider::PostgreSql => help(
+                ui,
+                "Leave empty to read it from the PostgreSQL password file (PGPASSFILE, ~/.pgpass or \
+                 %APPDATA%\\postgresql\\pgpass.conf). A password typed here is stored in plain text in settings.json.",
+            ),
+        }
 
         if edited {
             self.test = TestState::Idle;

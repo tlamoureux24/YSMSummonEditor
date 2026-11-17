@@ -197,11 +197,11 @@ async fn insert_tree_entry(client: &mut SqlClient, tree_id: i32, e: &SkillTreeEn
         INSERT INTO SkillTreeResource
         (skill_tree_id, skill_id, skill_group_id, min_skill_lv, max_skill_lv, lv, job_lv,
          need_skill_id_1, need_skill_lv_1, need_skill_id_2, need_skill_lv_2,
-         need_skill_id_3, need_skill_lv_3, cenhance_min, cenhance_max)
+         need_skill_id_3, need_skill_lv_3, cenhance_min, cenhance_max, jp_ratio)
         VALUES
         (@P1, @P2, @P3, @P4, @P5, @P6, @P7,
          @P8, @P9, @P10, @P11,
-         @P12, @P13, @P14, @P15);";
+         @P12, @P13, @P14, @P15, @P16);";
 
     let mut query = Query::new(SQL);
     for value in [
@@ -223,6 +223,7 @@ async fn insert_tree_entry(client: &mut SqlClient, tree_id: i32, e: &SkillTreeEn
     ] {
         query.bind(value);
     }
+    query.bind(e.jp_ratio);
     query.execute(client).await?;
     Ok(())
 }

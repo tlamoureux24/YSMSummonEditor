@@ -165,6 +165,16 @@ impl FieldValue {
         matches!(self, FieldValue::Null)
     }
 
+    /// Renders the value as a PostgreSQL literal.
+    pub fn pg_literal(&self) -> String {
+        match self {
+            FieldValue::Null => "NULL".to_owned(),
+            FieldValue::Bool(v) => if *v { "true" } else { "false" }.to_owned(),
+            FieldValue::Text(v) | FieldValue::Unsupported(v) => format!("'{}'", v.replace('\'', "''")),
+            other => other.to_string(),
+        }
+    }
+
     /// Renders the value as a T-SQL literal.
     pub fn sql_literal(&self) -> String {
         match self {
@@ -275,6 +285,9 @@ mod tests {
         assert_eq!(FieldValue::I32(-5).sql_literal(), "-5");
         assert_eq!(FieldValue::F64(0.5).sql_literal(), "0.5");
         assert_eq!(FieldValue::Text("O'Neil".into()).sql_literal(), "N'O''Neil'");
+        assert_eq!(FieldValue::Text("O'Neil".into()).pg_literal(), "'O''Neil'");
+        assert_eq!(FieldValue::Bool(true).pg_literal(), "true");
+        assert_eq!(FieldValue::Null.pg_literal(), "NULL");
     }
 
     #[test]

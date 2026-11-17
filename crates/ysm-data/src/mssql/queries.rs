@@ -143,7 +143,8 @@ pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i3
             need_skill_id_3 AS NeedSkillId3,
             need_skill_lv_3 AS NeedSkillLv3,
             cenhance_min AS CEnhanceMin,
-            cenhance_max AS CEnhanceMax
+            cenhance_max AS CEnhanceMax,
+            CAST(jp_ratio AS decimal(18,6)) AS JpRatio
         FROM SkillTreeResource
         WHERE skill_tree_id = @P1
         ORDER BY lv ASC, skill_id ASC;";
@@ -165,6 +166,7 @@ pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i3
                 need_skill_lv: [0; 3],
                 cenhance_min: 0,
                 cenhance_max: 0,
+                jp_ratio: Decimal::ONE,
             };
             for i in 0..3 {
                 entry.need_skill_id[i] = c.i32();
@@ -172,6 +174,7 @@ pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i3
             }
             entry.cenhance_min = c.i32();
             entry.cenhance_max = c.i32();
+            entry.jp_ratio = c.decimal();
             entry
         })
         .collect())

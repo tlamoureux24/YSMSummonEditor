@@ -86,6 +86,8 @@ pub struct SkillTreeEntry {
     pub need_skill_lv: [i32; 3],
     pub cenhance_min: i32,
     pub cenhance_max: i32,
+    /// `jp_ratio`: not shown or edited, carried so a rewritten tree keeps it.
+    pub jp_ratio: Decimal,
 }
 
 impl SkillTreeEntry {
@@ -103,6 +105,7 @@ impl SkillTreeEntry {
             need_skill_lv: [0; 3],
             cenhance_min: 0,
             cenhance_max: 0,
+            jp_ratio: Decimal::ONE,
         }
     }
 

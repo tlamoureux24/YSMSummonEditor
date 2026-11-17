@@ -26,7 +26,10 @@ use ysm_core::save_plan::UsageReport;
 use ysm_core::session::{ChainBundle, TreeRef};
 use ysm_core::value::SkillRecord;
 use ysm_data::repository::SKILL_SEARCH_LIMIT;
-use ysm_data::{AssetIndex, DataError, DbSettings, InMemoryRepository, MssqlRepository, SummonRepository, loader};
+use ysm_data::{
+    AssetIndex, DataError, DbProvider, DbSettings, InMemoryRepository, MssqlRepository, PgRepository, SummonRepository,
+    loader,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FailureKind {
@@ -295,7 +298,15 @@ fn next_command(queue: &mut VecDeque<Command>) -> Option<Command> {
 enum Source {
     None,
     Demo,
-    Mssql(DbSettings),
+    Database(DbSettings),
+}
+
+/// A repository for the configured server; no connection is opened yet.
+fn open_repository(settings: &DbSettings) -> ysm_data::Result<Box<dyn SummonRepository>> {
+    Ok(match settings.provider {
+        DbProvider::Mssql => Box::new(MssqlRepository::new(settings.clone())?),
+        DbProvider::PostgreSql => Box::new(PgRepository::new(settings.clone())?),
+    })
 }
 
 struct Worker {
@@ -338,10 +349,8 @@ impl Worker {
     /// A panic may have left a database connection half-way through a
     /// conversation, so the repository is rebuilt and reconnects on next use.
     fn recover_after_panic(&mut self) {
-        if let Source::Mssql(settings) = &self.source {
-            self.repository = MssqlRepository::new(settings.clone())
-                .ok()
-                .map(|repository| Box::new(repository) as Box<dyn SummonRepository>);
+        if let Source::Database(settings) = &self.source {
+            self.repository = open_repository(settings).ok();
         }
     }
 
@@ -349,10 +358,10 @@ impl Worker {
         match command {
             Command::Connect(settings) => {
                 self.repository = None;
-                self.source = Source::Mssql(settings.clone());
-                let result = MssqlRepository::new(settings.clone()).and_then(|mut repository| {
+                self.source = Source::Database(settings.clone());
+                let result = open_repository(settings).and_then(|mut repository| {
                     let version = repository.test_connection()?;
-                    self.repository = Some(Box::new(repository));
+                    self.repository = Some(repository);
                     Ok(version)
                 });
                 Event::Connected(result.map_err(Failure::from))
@@ -365,7 +374,7 @@ impl Worker {
                 Event::Connected(description)
             }
             Command::TestConnection(settings) => Event::ConnectionTested(
-                MssqlRepository::new(settings.clone())
+                open_repository(settings)
                     .and_then(|mut repository| repository.test_connection())
                     .map_err(Failure::from),
             ),

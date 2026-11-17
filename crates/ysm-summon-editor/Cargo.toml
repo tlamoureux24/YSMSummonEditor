@@ -13,7 +13,8 @@ ysm-core.workspace = true
 ysm-data.workspace = true
 rust_decimal.workspace = true
 
-eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts"] }
+# x11 and wayland only matter on Linux, where winit refuses to build without one of them.
+eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "x11", "wayland"] }
 egui_extras = { version = "0.36", default-features = false }
 egui-phosphor = "0.14"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "bmp", "tga", "dds", "webp", "ico"] }

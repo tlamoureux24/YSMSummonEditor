@@ -1,14 +1,16 @@
 //! Bootstrap of database settings from a local `.env.local` file.
 //!
 //! The file holds one ADO-style connection string under
-//! `YSM_DB_CONNECTION_STRING` and is looked up from the working directory
-//! and the executable's directory upwards.
+//! `YSM_DB_CONNECTION_STRING`, optionally the server kind under
+//! `YSM_DB_PROVIDER` (`MSSQL`, the default, or `PostgreSQL`), and is looked
+//! up from the working directory and the executable's directory upwards.
 
 use std::path::{Path, PathBuf};
 
-use crate::settings::DbSettings;
+use crate::settings::{DbProvider, DbSettings};
 
 const CONNECTION_STRING_KEY: &str = "YSM_DB_CONNECTION_STRING";
+const PROVIDER_KEY: &str = "YSM_DB_PROVIDER";
 const ENV_FILE_NAME: &str = ".env.local";
 
 /// Database settings from the nearest `.env.local`, with the file they came from.
@@ -19,7 +21,8 @@ pub fn load_db_settings() -> Option<(DbSettings, PathBuf)> {
 
     let path = find_env_local(&roots)?;
     let content = std::fs::read_to_string(&path).ok()?;
-    let settings = parse_connection_string(&read_connection_string(&content)?)?;
+    let provider = read_value(&content, PROVIDER_KEY).and_then(|v| DbProvider::parse(&v)).unwrap_or_default();
+    let settings = parse_connection_string_for(provider, &read_connection_string(&content)?)?;
     Some((settings, path))
 }
 
@@ -30,13 +33,18 @@ pub fn find_env_local(roots: &[PathBuf]) -> Option<PathBuf> {
 
 /// Extracts the connection string from the contents of an env file.
 pub fn read_connection_string(content: &str) -> Option<String> {
+    read_value(content, CONNECTION_STRING_KEY)
+}
+
+/// Value of one `KEY=value` line of an env file.
+fn read_value(content: &str, wanted: &str) -> Option<String> {
     content.lines().find_map(|raw_line| {
         let line = raw_line.trim();
         if line.is_empty() || line.starts_with('#') {
             return None;
         }
         let (key, value) = line.split_once('=')?;
-        if key.trim() != CONNECTION_STRING_KEY {
+        if key.trim() != wanted {
             return None;
         }
         let value = value.trim();
@@ -45,9 +53,15 @@ pub fn read_connection_string(content: &str) -> Option<String> {
     })
 }
 
-/// Parses an ADO-style connection string. Returns `None` unless server,
-/// database and user are all present.
+/// Parses an ADO-style MSSQL connection string. Returns `None` unless
+/// server, database and user are all present.
 pub fn parse_connection_string(connection_string: &str) -> Option<DbSettings> {
+    parse_connection_string_for(DbProvider::Mssql, connection_string)
+}
+
+/// Parses a connection string for a provider. PostgreSQL strings in the
+/// Npgsql style (`Host=…;Port=…;Username=…`) are accepted too.
+pub fn parse_connection_string_for(provider: DbProvider, connection_string: &str) -> Option<DbSettings> {
     let pairs = split_pairs(connection_string);
     let get = |keys: &[&str]| {
         keys.iter().find_map(|key| {
@@ -55,8 +69,8 @@ pub fn parse_connection_string(connection_string: &str) -> Option<DbSettings> {
         })
     };
 
-    let mut settings = DbSettings::default();
-    if let Some(server) = get(&["Server", "Data Source", "Address", "Addr", "Network Address"]) {
+    let mut settings = DbSettings::for_provider(provider);
+    if let Some(server) = get(&["Server", "Host", "Data Source", "Address", "Addr", "Network Address"]) {
         let server = server.strip_prefix("tcp:").unwrap_or(&server);
         match server.split_once(',') {
             Some((host, port)) => {
@@ -68,10 +82,13 @@ pub fn parse_connection_string(connection_string: &str) -> Option<DbSettings> {
             None => settings.server = server.trim().to_owned(),
         }
     }
+    if let Some(port) = get(&["Port"]).and_then(|p| p.trim().parse().ok()) {
+        settings.port = port;
+    }
     if let Some(database) = get(&["Database", "Initial Catalog"]) {
         settings.database = database;
     }
-    if let Some(user) = get(&["User Id", "UID", "User"]) {
+    if let Some(user) = get(&["User Id", "UID", "User", "Username", "User Name"]) {
         settings.user_id = user;
     }
     if let Some(password) = get(&["Password", "Pwd"]) {
@@ -149,6 +166,28 @@ mod tests {
         let settings = parse_connection_string("Server=h,2000;Database=d;User Id=u;Password='a;b=c';").unwrap();
         assert_eq!(settings.password, "a;b=c");
         assert_eq!(settings.port, 2000);
+    }
+
+    #[test]
+    fn postgres_strings_use_their_own_keys_and_default_port() {
+        let settings =
+            parse_connection_string_for(DbProvider::PostgreSql, "Host=127.0.0.1;Database=arcadia;Username=rz").unwrap();
+        assert_eq!(settings.provider, DbProvider::PostgreSql);
+        assert_eq!(settings.server, "127.0.0.1");
+        assert_eq!(settings.port, 5432);
+        assert_eq!(settings.user_id, "rz");
+        assert!(settings.password.is_empty(), "the password may come from the pgpass file");
+
+        let with_port =
+            parse_connection_string_for(DbProvider::PostgreSql, "Host=h;Port=5433;Database=d;Username=u").unwrap();
+        assert_eq!(with_port.port, 5433);
+    }
+
+    #[test]
+    fn provider_is_read_from_the_env_file() {
+        let content = "YSM_DB_PROVIDER=PostgreSQL\nYSM_DB_CONNECTION_STRING=Host=h;Database=d;Username=u\n";
+        assert_eq!(read_value(content, PROVIDER_KEY).as_deref(), Some("PostgreSQL"));
+        assert_eq!(read_connection_string(content).as_deref(), Some("Host=h;Database=d;Username=u"));
     }
 
     #[test]

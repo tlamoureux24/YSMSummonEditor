@@ -104,7 +104,8 @@ impl EditorApp {
 
         let request = planner.finish();
         let rows = build_review_rows(&self.state.session, &request);
-        let sql = render_script(&request, &Local::now().format("%Y-%m-%d %H:%M:%S").to_string());
+        let dialect = self.state.settings.database.provider.sql_dialect();
+        let sql = render_script(&request, &Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
         let settings = &self.state.settings;
         let target =
             if self.state.demo { "demo data (in memory)".to_owned() } else { settings.database.display_target() };
@@ -178,7 +179,8 @@ impl EditorApp {
             return;
         };
 
-        let sql = render_script(request, &now.format("%Y-%m-%d %H:%M:%S").to_string());
+        let dialect = self.state.settings.database.provider.sql_dialect();
+        let sql = render_script(request, &now.format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
         if let Err(error) = std::fs::write(&path, sql) {
             self.save_failed("The SQL file could not be written.", error.to_string());
             return;

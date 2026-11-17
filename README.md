@@ -7,9 +7,9 @@
 **A fast, native editor for Rappelz summon data: skill trees, skills, random skill groups and stat scaling.**
 
 [![Release](https://img.shields.io/github/v/release/YoSiem/YSMSummonEditor?include_prereleases&label=release&color=3d7ab8)](https://github.com/YoSiem/YSMSummonEditor/releases)
-![Platform](https://img.shields.io/badge/platform-Windows%20x64-5c728a)
+![Platform](https://img.shields.io/badge/platform-Windows%20x64%20%7C%20Linux-5c728a)
 ![Built with](https://img.shields.io/badge/built%20with-Rust%20%2B%20egui-b7410e)
-![Database](https://img.shields.io/badge/database-MSSQL-6b849f)
+![Database](https://img.shields.io/badge/database-MSSQL%20%7C%20PostgreSQL-6b849f)
 [![License](https://img.shields.io/badge/license-MIT-4a5f78)](LICENSE)
 
 [Download](https://github.com/YoSiem/YSMSummonEditor/releases) · [Quick start](#quick-start) · [Features](#features) · [Build from source](#build-from-source)
@@ -18,7 +18,7 @@
 
 ![Main window](docs/screenshots/main.png)
 
-YSM Summon Editor is a single executable with nothing to install. Every edit is staged first, reviewed before it is saved, and then either written to MSSQL in one transaction or exported as an executable `.sql` script.
+YSM Summon Editor is a single executable with nothing to install. Every edit is staged first, reviewed before it is saved, and then either written to the database (MSSQL or PostgreSQL) in one transaction or exported as an executable `.sql` script.
 
 > [!WARNING]
 > **Alpha.** This is a full rewrite of the original WPF/.NET editor in Rust. The SQL was carried over statement for statement, but the database layer has not yet been validated against a live server. Back up your database, and use **Save to `.sql`** to inspect what would be written before saving to the database directly.
@@ -63,7 +63,7 @@ YSM Summon Editor is a single executable with nothing to install. Every edit is 
 
 - Nothing touches the database until you review the complete list of changes.
 - Data shared with other summons is detected before saving, and you choose between cloning it for the edited summon or editing it in place for everyone.
-- Save directly to MSSQL in a single transaction, or export an executable `.sql` script.
+- Save directly to MSSQL or PostgreSQL in a single transaction, or export an executable `.sql` script in the server's own SQL.
 - Unsaved changes are protected when you switch summons or close the window.
 
 ## Screenshots
@@ -82,7 +82,7 @@ The screenshots show the built-in demo data, which has no client images and ther
 ## Quick start
 
 1. Download `ysm-summon-editor.exe` from the [latest release](https://github.com/YoSiem/YSMSummonEditor/releases) and run it. No runtime is required.
-2. Open **Settings**, enter the MSSQL connection and press **Test connection**.
+2. Open **Settings**, pick the server type (MSSQL or PostgreSQL), enter the connection and press **Test connection**.
 3. Point **Client dump folder** at your extracted client files to get icons and illustrations.
 4. Pick a summon from the list and start editing.
 
@@ -98,13 +98,20 @@ Demo mode runs on built-in sample data held in memory. Every feature works, incl
 
 ## Configuration
 
-Settings are stored in `%LOCALAPPDATA%\YSMSummonEditor\settings.json` and are edited in **Settings**. The database password is kept there in plain text.
+Settings are stored in `%LOCALAPPDATA%\YSMSummonEditor\settings.json` (`~/.local/share/YSMSummonEditor/settings.json` on Linux) and are edited in **Settings**. A database password typed there is kept in plain text.
 
 | Setting | Notes |
 |---|---|
-| Server, port, database, user, password | SQL Server authentication over TCP. The port defaults to `1433`. |
-| Trust server certificate | Accepts the server certificate without validating it, which is the usual choice for a local server. |
+| Server type | MSSQL or PostgreSQL. Settings files written before PostgreSQL support open as MSSQL. |
+| Server, port, database, user, password | Password authentication over TCP. The port defaults to `1433` for MSSQL and `5432` for PostgreSQL. |
+| Trust server certificate | MSSQL only. Accepts the server certificate without validating it, which is the usual choice for a local server. |
 | Client dump folder | Scanned recursively for images. Defaults to `%USERPROFILE%\Desktop\Dump`, created on first run. |
+
+### PostgreSQL
+
+- Tables are found through the database's `search_path`, so a database migrated from MSSQL into a `dbo` schema works once `search_path` names it (`ALTER DATABASE <db> SET search_path = dbo, public`). Names are not quoted: the usual lower-case tables are found whatever the case written in the SQL.
+- Leave the password empty to take it from the PostgreSQL password file, as `psql` does: `PGPASSFILE`, else `~/.pgpass` (`%APPDATA%\postgresql\pgpass.conf` on Windows). Nothing is then stored in `settings.json`.
+- The connection is not encrypted (`NoTls`), which suits a local server.
 
 ### Bootstrap from `.env.local`
 
@@ -112,6 +119,13 @@ When no database is configured yet, the connection is read from a `.env.local` f
 
 ```env
 YSM_DB_CONNECTION_STRING=Server=127.0.0.1,1433;Database=YourDb;User Id=YourUser;Password=YourPass;TrustServerCertificate=True;Encrypt=False
+```
+
+For PostgreSQL, add `YSM_DB_PROVIDER`; `Host`, `Port` and `Username` are accepted as well:
+
+```env
+YSM_DB_PROVIDER=PostgreSQL
+YSM_DB_CONNECTION_STRING=Host=127.0.0.1;Port=5432;Database=YourDb;Username=YourUser
 ```
 
 [`.env.local.template`](.env.local.template) is a starting point. `.env.local` itself is ignored by git.
@@ -126,7 +140,7 @@ Edits are staged, and the **Save** button shows how many are pending. Saving alw
    - **DB** applies everything in a single transaction after one more confirmation, then reloads the summon from the database.
    - **.sql** writes the script to a file and leaves the database untouched. Staged changes stay staged.
 
-The exported script runs as one transaction with `XACT_ABORT ON`, so an error rolls everything back.
+The exported script is written for the configured server and runs as one transaction, so an error rolls everything back: T-SQL with `XACT_ABORT ON` for MSSQL, plain SQL between `BEGIN` and `COMMIT` for PostgreSQL (run it with `psql -v ON_ERROR_STOP=1 -f <file>`).
 
 ## Keyboard shortcuts
 
@@ -145,7 +159,7 @@ Right-click a tree row for the full menu, including the random group actions.
 
 ## Build from source
 
-Requires [Rust](https://rustup.rs) 1.88 or newer on Windows.
+Requires [Rust](https://rustup.rs) 1.88 or newer, on Windows or Linux.
 
 ```powershell
 git clone https://github.com/YoSiem/YSMSummonEditor.git
@@ -153,7 +167,7 @@ cd YSMSummonEditor
 cargo build --release -p ysm-summon-editor
 ```
 
-The executable is written to `target\release\ysm-summon-editor.exe`.
+The executable is written to `target\release\ysm-summon-editor.exe` (`target/release/ysm-summon-editor` on Linux). On Linux the window runs on Wayland or X11, and the build needs the OpenSSL headers (`libssl-dev` / `openssl-devel`) for the MSSQL driver.
 
 ## Architecture
 
@@ -162,7 +176,7 @@ The workspace has three crates with strict one-way dependencies:
 | Crate | Responsibility |
 |---|---|
 | [`ysm-core`](crates/ysm-core) | Pure domain logic with no IO: models, the edit session with undo/redo, save planning, review rows, SQL script generation, the stat scaling calculator and the tooltip markup parser. |
-| [`ysm-data`](crates/ysm-data) | The `SummonRepository` trait with an MSSQL implementation ([tiberius](https://github.com/prisma/tiberius)) and an in-memory one, plus settings, `.env.local` loading and the asset index. |
+| [`ysm-data`](crates/ysm-data) | The `SummonRepository` trait with an MSSQL implementation ([tiberius](https://github.com/prisma/tiberius)), a PostgreSQL one ([tokio-postgres](https://github.com/sfackler/rust-postgres)) and an in-memory one, plus settings, `.env.local` loading and the asset index. |
 | [`ysm-summon-editor`](crates/ysm-summon-editor) | The [egui](https://github.com/emilk/egui) application: views, dialogs and the background worker. |
 
 The UI thread never queries the database or decodes an image. Views push actions, the application reduces them, and a worker thread owns the connection:
@@ -175,12 +189,13 @@ flowchart LR
     Worker -- Event --> App
     Worker --> Repo["SummonRepository"]
     Repo --> Mssql[("MSSQL")]
+    Repo --> Pg[("PostgreSQL")]
     Repo --> Memory[("Demo data")]
 ```
 
 Where to start when extending the editor:
 
-- **A new query or write:** add a method to `SummonRepository` in [`repository.rs`](crates/ysm-data/src/repository.rs), then implement it in [`mssql/`](crates/ysm-data/src/mssql) and [`memory.rs`](crates/ysm-data/src/memory.rs).
+- **A new query or write:** add a method to `SummonRepository` in [`repository.rs`](crates/ysm-data/src/repository.rs), then implement it in [`mssql/`](crates/ysm-data/src/mssql), [`pg/`](crates/ysm-data/src/pg) and [`memory.rs`](crates/ysm-data/src/memory.rs).
 - **A new kind of staged change:** extend `EditSession` in [`session/`](crates/ysm-core/src/session), then `CommitRequest`, `sql_script.rs` and `review.rs`.
 - **A new screen:** add a dialog under [`dialogs/`](crates/ysm-summon-editor/src/dialogs), an `Action` that opens it, and its handling in [`app/actions.rs`](crates/ysm-summon-editor/src/app/actions.rs).
 
@@ -194,11 +209,19 @@ cargo clippy --workspace --all-targets -- -D warnings
 cargo fmt --all
 ```
 
-The MSSQL layer has a smoke test that only runs on request, against a database you point it at:
+The MSSQL and PostgreSQL layers have read-only smoke tests that only run on request, against a database you point them at:
 
 ```powershell
 $env:YSM_MSSQL_TEST_CONNECTION = "Server=...;Database=...;User Id=...;Password=...;TrustServerCertificate=True"
+$env:YSM_PG_TEST_CONNECTION = "Host=...;Database=...;Username=..."
 cargo test -p ysm-data -- --ignored
+```
+
+PostgreSQL also has a write test that goes through every kind of save and a failed one. It **changes the data**: run it only on a disposable copy of a database. With `YSM_PG_WRITE_TEST_SCRIPT` set, it also appends the `.sql` export of each save to that file; replayed with `psql` on a second copy, it must leave the same rows.
+
+```powershell
+$env:YSM_PG_WRITE_TEST_CONNECTION = "Host=...;Database=<disposable copy>;Username=..."
+cargo test -p ysm-data --test pg_live_write -- --ignored --nocapture
 ```
 
 Debug builds can play back a UI script and save screenshots, which is how the images in this README were made:
