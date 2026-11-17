@@ -128,7 +128,7 @@ mod tests {
 
     fn wrapped_strings(source: &str) -> Vec<String> {
         let mut keys = Vec::new();
-        for marker in ["tr(\"", "trf(\""] {
+        for marker in ["tr(", "trf("] {
             let mut rest = source;
             while let Some(at) = rest.find(marker) {
                 let before = rest[..at].chars().last();
@@ -136,6 +136,12 @@ mod tests {
                 if before.is_some_and(|c| c.is_alphanumeric() || c == '_') {
                     continue;
                 }
+                // rustfmt may move the string to the next line: `tr(\n    "…"`.
+                let trimmed = rest.trim_start();
+                let Some(after_quote) = trimmed.strip_prefix('"') else {
+                    continue;
+                };
+                rest = after_quote;
                 let mut key = String::new();
                 let mut chars = rest.chars();
                 while let Some(c) = chars.next() {
