@@ -1,7 +1,7 @@
 //! Header card: the selected summon, its evolution chain and illustration.
 
 use eframe::egui::{self, Align, Align2, CornerRadius, Layout, RichText, Sense, Stroke, StrokeKind, Ui, Vec2};
-use ysm_core::model::{EvolutionChain, STAGE_COUNT};
+use ysm_core::model::{EvolutionChain, STAGE_COUNT, SummonListItem};
 
 use super::ViewContext;
 use crate::action::Action;
@@ -29,7 +29,7 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
 
         let illustration = view
             .textures
-            .illustration(chain.stage3.illust_file_name.as_deref())
+            .illustration(shown_summon(chain, state.active_stage).illust_file_name.as_deref())
             .map(|texture| (texture.id(), texture.aspect_ratio()));
         let image_size = illustration.map(|(_, aspect)| Vec2::new(CONTENT_HEIGHT * aspect, CONTENT_HEIGHT));
         let image_width = image_size.map_or(0.0, |size| size.x + space::MD);
@@ -67,8 +67,13 @@ fn placeholder(ui: &mut Ui, loading: bool) {
     }
 }
 
+/// The summon of the stage being edited; the final one when that stage is missing.
+fn shown_summon(chain: &EvolutionChain, active_stage: u8) -> &SummonListItem {
+    chain.stage(active_stage).unwrap_or(&chain.stage3)
+}
+
 fn details(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionChain) {
-    let summon = &chain.stage3;
+    let summon = shown_summon(chain, view.state.active_stage);
     ui.spacing_mut().item_spacing.y = space::XS;
 
     ui.horizontal(|ui| {
@@ -148,6 +153,56 @@ fn evolution_chain(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionCha
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
             view.actions.push(Action::SetStage(stage));
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+    use ysm_data::{AppSettings, InMemoryRepository, SummonRepository, loader};
+
+    use super::*;
+    use crate::state::AppState;
+    use crate::textures::TextureStore;
+
+    struct Fixture {
+        state: AppState,
+        textures: Option<TextureStore>,
+        actions: Vec<Action>,
+    }
+
+    /// The header of the demo chain 1011 -> 1012 -> 1013 with `stage` active.
+    fn harness<'a>(stage: u8) -> Harness<'a, Fixture> {
+        let mut repo = InMemoryRepository::demo();
+        let summon = repo.summon_by_id(1013).unwrap().unwrap();
+        let mut state = AppState::new(AppSettings::default(), true);
+        state.session.load(loader::load_chain(&mut repo, &summon).unwrap());
+        state.active_stage = stage;
+
+        Harness::builder().with_size([1100.0, 260.0]).build_ui_state(
+            |ui, fixture: &mut Fixture| {
+                let Some(textures) = fixture.textures.as_mut() else {
+                    crate::theme::apply(ui.ctx());
+                    fixture.textures = Some(TextureStore::new(ui.ctx()));
+                    return;
+                };
+                let mut view = ViewContext { state: &fixture.state, textures, actions: &mut fixture.actions };
+                show(ui, &mut view);
+            },
+            Fixture { state, textures: None, actions: Vec::new() },
+        )
+    }
+
+    #[test]
+    fn the_header_shows_the_stage_being_edited() {
+        for (stage, id) in [(1, 1011), (2, 1012), (3, 1013)] {
+            let mut harness = harness(stage);
+            harness.run();
+            let name = &harness.state().state.session.chain().unwrap().stage(stage).unwrap().summon_name.clone();
+            harness.get_by_label_contains(&format!("ID {id}"));
+            harness.get_by_label(name);
         }
     }
 }
