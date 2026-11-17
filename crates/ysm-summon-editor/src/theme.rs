@@ -369,11 +369,117 @@ pub fn follow(ctx: &egui::Context, choice: ThemeChoice) {
     let light = match choice {
         ThemeChoice::Dark => false,
         ThemeChoice::Light => true,
-        ThemeChoice::System => ctx.system_theme() == Some(egui::Theme::Light),
+        ThemeChoice::System => match ctx.system_theme() {
+            Some(theme) => theme == egui::Theme::Light,
+            None => desktop::prefers_light(ctx).unwrap_or(false),
+        },
     };
+    if choice != ThemeChoice::System {
+        desktop::stop_watching();
+    }
     if light != color::is_light() {
         set_light(ctx, light);
     }
+}
+
+/// The desktop's light / dark preference when the windowing layer has none
+/// to give (winit reports nothing on Wayland): the XDG desktop portal's
+/// `org.freedesktop.appearance color-scheme`, read every two seconds by a
+/// background thread while the System theme is chosen.
+#[cfg(target_os = "linux")]
+mod desktop {
+    use std::process::{Command, Stdio};
+    use std::sync::Once;
+    use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+    use std::time::Duration;
+
+    use eframe::egui;
+
+    static WATCHING: AtomicBool = AtomicBool::new(false);
+    /// 0 unknown or no preference, 1 dark, 2 light: the portal's own values.
+    static SCHEME: AtomicU8 = AtomicU8::new(0);
+    static START: Once = Once::new();
+
+    pub(super) fn prefers_light(ctx: &egui::Context) -> Option<bool> {
+        WATCHING.store(true, Ordering::Relaxed);
+        START.call_once(|| {
+            let ctx = ctx.clone();
+            let _ = std::thread::Builder::new().name("desktop-theme".into()).spawn(move || watch(&ctx));
+        });
+        match SCHEME.load(Ordering::Relaxed) {
+            1 => Some(false),
+            2 => Some(true),
+            _ => None,
+        }
+    }
+
+    pub(super) fn stop_watching() {
+        WATCHING.store(false, Ordering::Relaxed);
+    }
+
+    fn watch(ctx: &egui::Context) {
+        loop {
+            if WATCHING.load(Ordering::Relaxed) {
+                let scheme = read_scheme().unwrap_or(0);
+                if SCHEME.swap(scheme, Ordering::Relaxed) != scheme {
+                    ctx.request_repaint();
+                }
+            }
+            std::thread::sleep(Duration::from_secs(2));
+        }
+    }
+
+    /// Asks the portal through `busctl` (systemd) or, failing that, `gdbus` (GLib).
+    fn read_scheme() -> Option<u8> {
+        const BUSCTL: &[&str] = &[
+            "--user",
+            "call",
+            "org.freedesktop.portal.Desktop",
+            "/org/freedesktop/portal/desktop",
+            "org.freedesktop.portal.Settings",
+            "ReadOne",
+            "ss",
+            "org.freedesktop.appearance",
+            "color-scheme",
+        ];
+        const GDBUS: &[&str] = &[
+            "call",
+            "--session",
+            "--dest",
+            "org.freedesktop.portal.Desktop",
+            "--object-path",
+            "/org/freedesktop/portal/desktop",
+            "--method",
+            "org.freedesktop.portal.Settings.ReadOne",
+            "org.freedesktop.appearance",
+            "color-scheme",
+        ];
+        run("busctl", BUSCTL).or_else(|| run("gdbus", GDBUS)).and_then(|output| parse(&output))
+    }
+
+    fn run(program: &str, args: &[&str]) -> Option<String> {
+        let output = Command::new(program).args(args).stdin(Stdio::null()).stderr(Stdio::null()).output().ok()?;
+        output.status.success().then(|| String::from_utf8_lossy(&output.stdout).into_owned())
+    }
+
+    /// The last number of `v u 2` (busctl) or `(<<uint32 2>>,)` (gdbus).
+    pub(super) fn parse(output: &str) -> Option<u8> {
+        let digits: String =
+            output.chars().rev().skip_while(|c| !c.is_ascii_digit()).take_while(char::is_ascii_digit).collect();
+        digits.chars().rev().collect::<String>().parse().ok().filter(|scheme| *scheme <= 2)
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+mod desktop {
+    use eframe::egui;
+
+    /// Windows and macOS report their theme through the windowing layer.
+    pub(super) fn prefers_light(_ctx: &egui::Context) -> Option<bool> {
+        None
+    }
+
+    pub(super) fn stop_watching() {}
 }
 
 fn set_light(ctx: &egui::Context, light: bool) {
@@ -506,6 +612,16 @@ pub fn window_icon() -> Option<egui::IconData> {
 #[cfg(test)]
 mod tests {
     use eframe::egui::Color32;
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn portal_answers_are_parsed() {
+        assert_eq!(super::desktop::parse("v u 2\n"), Some(2));
+        assert_eq!(super::desktop::parse("(<<uint32 1>>,)\n"), Some(1));
+        assert_eq!(super::desktop::parse("v u 0"), Some(0));
+        assert_eq!(super::desktop::parse("v u 7"), None);
+        assert_eq!(super::desktop::parse(""), None);
+    }
 
     use super::color;
 
