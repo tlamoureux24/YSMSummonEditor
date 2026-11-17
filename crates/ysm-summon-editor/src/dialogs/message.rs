@@ -7,6 +7,7 @@ use crate::action::Action;
 use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, modal};
+use ysm_core::i18n::tr;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MessageKind {
@@ -69,7 +70,7 @@ impl MessageDialog {
     pub fn error(title: impl Into<String>, text: impl Into<String>, details: impl Into<String>) -> Self {
         Self::new(MessageKind::Error, title, text).details(details).button(
             icons::CLOSE,
-            "Close",
+            tr("Close"),
             ButtonStyle::Plain,
             None,
         )

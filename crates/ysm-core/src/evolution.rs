@@ -4,9 +4,9 @@ use crate::model::{EvolutionChain, SummonListItem};
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ChainError {
-    #[error("selected summon is not a final evolution stage (evolve_target != 0)")]
+    #[error("{}", crate::i18n::tr("selected summon is not a final evolution stage (evolve_target != 0)"))]
     NotFinalStage,
-    #[error("evolution chain card_id mismatch detected")]
+    #[error("{}", crate::i18n::tr("evolution chain card_id mismatch detected"))]
     CardMismatch,
 }
 

@@ -106,6 +106,8 @@ Settings are stored in `%LOCALAPPDATA%\YSMSummonEditor\settings.json` (`~/.local
 | Server, port, database, user, password | Password authentication over TCP. The port defaults to `1433` for MSSQL and `5432` for PostgreSQL. |
 | Trust server certificate | MSSQL only. Accepts the server certificate without validating it, which is the usual choice for a local server. |
 | Client dump folder | Scanned recursively for images. Defaults to `%USERPROFILE%\Desktop\Dump`, created on first run. |
+| Theme | Dark (default), Light, or System, which follows the operating system live. Game tooltip colours are darkened on the light theme until they are readable. |
+| Language | English or French, for the interface and the game texts: `StringResource`, or `StringResource_EN` in English when the database has that table. Until one is chosen, the operating system's language (French for a `fr` locale, English otherwise). |
 
 ### PostgreSQL
 

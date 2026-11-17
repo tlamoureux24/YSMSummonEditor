@@ -102,9 +102,9 @@ pub enum FieldValue {
 
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum ValueError {
-    #[error("'{input}' is not a valid {expected} value")]
+    #[error("{}", crate::i18n::trf("'{}' is not a valid {} value", &[input, expected]))]
     Invalid { input: String, expected: &'static str },
-    #[error("this column type cannot be edited")]
+    #[error("{}", crate::i18n::tr("this column type cannot be edited"))]
     NotEditable,
 }
 

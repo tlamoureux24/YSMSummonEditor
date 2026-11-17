@@ -20,6 +20,7 @@ use std::sync::mpsc::{Receiver, Sender, channel};
 
 use eframe::egui;
 use ysm_core::commit::{CommitRequest, CommitResult};
+use ysm_core::i18n::Language;
 use ysm_core::model::{CreatureEnhance, SkillDisplay, StatScalingSnapshot, SummonListFilter, SummonListItem};
 use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::save_plan::UsageReport;
@@ -86,8 +87,9 @@ impl From<DataError> for Failure {
 pub type Outcome<T> = Result<T, Failure>;
 
 pub enum Command {
-    /// Switch to the MSSQL database described by the settings and verify it.
-    Connect(DbSettings),
+    /// Switch to the database described by the settings and verify it; game
+    /// texts are read in the given language.
+    Connect(DbSettings, Language),
     /// Switch to the built-in demo data.
     UseDemo,
     /// Try a connection without touching the active repository.
@@ -152,7 +154,7 @@ impl Command {
     /// The event that reports this command as failed.
     fn failed(&self, failure: Failure) -> Event {
         match self {
-            Command::Connect(_) | Command::UseDemo => Event::Connected(Err(failure)),
+            Command::Connect(..) | Command::UseDemo => Event::Connected(Err(failure)),
             Command::TestConnection(_) => Event::ConnectionTested(Err(failure)),
             // The index has no failure channel; an empty one is the honest result.
             Command::BuildAssetIndex(_) => Event::AssetIndexBuilt(Arc::new(AssetIndex::empty())),
@@ -298,15 +300,17 @@ fn next_command(queue: &mut VecDeque<Command>) -> Option<Command> {
 enum Source {
     None,
     Demo,
-    Database(DbSettings),
+    Database(DbSettings, Language),
 }
 
 /// A repository for the configured server; no connection is opened yet.
-fn open_repository(settings: &DbSettings) -> ysm_data::Result<Box<dyn SummonRepository>> {
-    Ok(match settings.provider {
+fn open_repository(settings: &DbSettings, language: Language) -> ysm_data::Result<Box<dyn SummonRepository>> {
+    let mut repository: Box<dyn SummonRepository> = match settings.provider {
         DbProvider::Mssql => Box::new(MssqlRepository::new(settings.clone())?),
         DbProvider::PostgreSql => Box::new(PgRepository::new(settings.clone())?),
-    })
+    };
+    repository.set_text_language(language);
+    Ok(repository)
 }
 
 struct Worker {
@@ -349,17 +353,17 @@ impl Worker {
     /// A panic may have left a database connection half-way through a
     /// conversation, so the repository is rebuilt and reconnects on next use.
     fn recover_after_panic(&mut self) {
-        if let Source::Database(settings) = &self.source {
-            self.repository = open_repository(settings).ok();
+        if let Source::Database(settings, language) = &self.source {
+            self.repository = open_repository(settings, *language).ok();
         }
     }
 
     fn handle(&mut self, command: &Command) -> Event {
         match command {
-            Command::Connect(settings) => {
+            Command::Connect(settings, language) => {
                 self.repository = None;
-                self.source = Source::Database(settings.clone());
-                let result = open_repository(settings).and_then(|mut repository| {
+                self.source = Source::Database(settings.clone(), *language);
+                let result = open_repository(settings, *language).and_then(|mut repository| {
                     let version = repository.test_connection()?;
                     self.repository = Some(repository);
                     Ok(version)
@@ -374,7 +378,7 @@ impl Worker {
                 Event::Connected(description)
             }
             Command::TestConnection(settings) => Event::ConnectionTested(
-                open_repository(settings)
+                open_repository(settings, Language::default())
                     .and_then(|mut repository| repository.test_connection())
                     .map_err(Failure::from),
             ),
@@ -569,7 +573,7 @@ mod tests {
         let failure = || Failure { kind: FailureKind::Internal, message: "x".into() };
         let tree = TreeRef::new(1, 1);
         let commands = [
-            Command::Connect(DbSettings::default()),
+            Command::Connect(DbSettings::default(), Language::default()),
             Command::UseDemo,
             Command::TestConnection(DbSettings::default()),
             search(4),

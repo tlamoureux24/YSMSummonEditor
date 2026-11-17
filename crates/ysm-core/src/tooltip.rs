@@ -4,6 +4,7 @@
 //! colours written as `<#RRGGBB>` … `</#RRGGBB>`. Unknown tags are dropped
 //! and their text content is preserved.
 
+use crate::i18n::trf;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TooltipSegment {
     pub text: String,
@@ -74,7 +75,7 @@ pub fn to_plain_text(markup: &str) -> String {
 pub fn plain_or_fallback(markup: Option<&str>, skill_id: i32, skill_name: &str) -> String {
     let plain = markup.map(to_plain_text).unwrap_or_default();
     let plain = plain.trim();
-    if plain.is_empty() { format!("Skill {skill_id} | {skill_name}") } else { plain.to_owned() }
+    if plain.is_empty() { trf("Skill {} | {}", &[&skill_id, &skill_name]) } else { plain.to_owned() }
 }
 
 /// Converts `#RRGGBB` / `#AARRGGBB` into `[r, g, b, a]`.

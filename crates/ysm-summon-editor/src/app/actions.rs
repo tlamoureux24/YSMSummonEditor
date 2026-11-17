@@ -15,6 +15,7 @@ use crate::dialogs::skill_picker::SkillPickerDialog;
 use crate::dialogs::{Dialog, MessageDialog};
 use crate::icons;
 use crate::worker::Command;
+use ysm_core::i18n::{tr, trf};
 
 impl EditorApp {
     pub(super) fn handle_action(&mut self, ctx: &egui::Context, action: Action) {
@@ -30,15 +31,15 @@ impl EditorApp {
                 if self.state.session.has_changes() {
                     let dialog = MessageDialog::new(
                         MessageKind::Question,
-                        "Unsaved changes",
-                        format!(
+                        tr("Unsaved changes"),
+                        trf(
                             "The current summon has staged changes. What should happen before opening {}?",
-                            summon.summon_name
+                            &[&summon.summon_name],
                         ),
                     )
-                    .button(icons::SAVE, "Save", ButtonStyle::Primary, Some(Action::SaveAndSwitch(summon.clone())))
-                    .button(icons::DISCARD, "Discard", ButtonStyle::Danger, Some(Action::SwitchSummon(summon)))
-                    .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+                    .button(icons::SAVE, tr("Save"), ButtonStyle::Primary, Some(Action::SaveAndSwitch(summon.clone())))
+                    .button(icons::DISCARD, tr("Discard"), ButtonStyle::Danger, Some(Action::SwitchSummon(summon)))
+                    .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
                     self.push_dialog(Dialog::message(dialog));
                 } else {
                     self.load_chain(summon);
@@ -54,16 +55,16 @@ impl EditorApp {
                 if self.state.session.has_changes() {
                     let dialog = MessageDialog::new(
                         MessageKind::Warning,
-                        "Reload from database",
-                        "Reloading discards every staged change of this summon.",
+                        tr("Reload from database"),
+                        tr("Reloading discards every staged change of this summon."),
                     )
                     .button(
                         icons::REFRESH,
-                        "Discard and reload",
+                        tr("Discard and reload"),
                         ButtonStyle::Danger,
                         Some(Action::SwitchSummon(summon)),
                     )
-                    .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+                    .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
                     self.push_dialog(Dialog::message(dialog));
                 } else {
                     self.load_chain(summon);
@@ -74,37 +75,37 @@ impl EditorApp {
             Action::Save => self.start_save(SaveOrigin::Toolbar),
             Action::Undo => {
                 if self.state.session.undo() {
-                    self.set_status("Undone.");
+                    self.set_status(tr("Undone."));
                 }
             }
             Action::Redo => {
                 if self.state.session.redo() {
-                    self.set_status("Redone.");
+                    self.set_status(tr("Redone."));
                 }
             }
             Action::AskDiscardAll => {
                 let count = self.state.session.change_count();
                 let dialog = MessageDialog::new(
                     MessageKind::Warning,
-                    "Discard staged changes",
-                    format!("Discard all {count} staged change(s)? Trees, skills, stats and random groups return to their database state."),
+                    tr("Discard staged changes"),
+                    trf("Discard all {} staged change(s)? Trees, skills, stats and random groups return to their database state.", &[&count]),
                 )
-                .button(icons::DISCARD, "Discard all", ButtonStyle::Danger, Some(Action::DiscardAll))
-                .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+                .button(icons::DISCARD, tr("Discard all"), ButtonStyle::Danger, Some(Action::DiscardAll))
+                .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
                 self.push_dialog(Dialog::message(dialog));
             }
             Action::DiscardAll => {
                 self.state.session.discard_all();
-                self.set_status("Staged changes discarded.");
+                self.set_status(tr("Staged changes discarded."));
             }
             Action::OpenStats => {
                 if let Some(chain) = self.state.session.chain() {
                     self.worker.send(Command::LoadScaling { summon_id: chain.stage3.summon_id });
-                    self.set_status("Loading stat scaling…");
+                    self.set_status(tr("Loading stat scaling…"));
                 }
             }
             Action::Reconnect => {
-                self.set_status("Reconnecting…");
+                self.set_status(tr("Reconnecting…"));
                 self.connect();
             }
             Action::OpenSettings => {
@@ -114,7 +115,11 @@ impl EditorApp {
             Action::SetSaveToSql(to_sql) => {
                 self.state.settings.save_to_sql_mode = to_sql;
                 self.save_settings();
-                self.set_status(if to_sql { "Save mode set to .sql (staged export)." } else { "Save mode set to DB." });
+                self.set_status(if to_sql {
+                    tr("Save mode set to .sql (staged export).")
+                } else {
+                    tr("Save mode set to DB.")
+                });
             }
 
             // ---- tree panel ----
@@ -132,7 +137,7 @@ impl EditorApp {
             Action::AddRow(tree) => {
                 if let Some(uid) = self.state.session.add_row(tree, 0) {
                     self.state.selected_row = Some(uid);
-                    self.set_status("Row added. Enter a skill ID or use Change Skill.");
+                    self.set_status(tr("Row added. Enter a skill ID or use Change Skill."));
                 }
             }
             Action::OpenSkillPicker(purpose) => {
@@ -145,12 +150,12 @@ impl EditorApp {
                     PickerPurpose::AddRow(tree) => {
                         if let Some(uid) = self.state.session.add_row(tree, skill_id) {
                             self.state.selected_row = Some(uid);
-                            self.set_status(format!("Added {name} ({skill_id})."));
+                            self.set_status(trf("Added {} ({}).", &[&name, &skill_id]));
                         }
                     }
                     PickerPurpose::ChangeSkill(tree, uid) => {
                         if self.state.session.set_field(tree, uid, EntryField::SkillId, skill_id) {
-                            self.set_status(format!("Skill changed to {name} ({skill_id})."));
+                            self.set_status(trf("Skill changed to {} ({}).", &[&name, &skill_id]));
                         }
                     }
                 }
@@ -158,23 +163,23 @@ impl EditorApp {
             Action::DuplicateRow(tree, uid) => {
                 if let Some(copy) = self.state.session.duplicate_row(tree, uid) {
                     self.state.selected_row = Some(copy);
-                    self.set_status("Row duplicated.");
+                    self.set_status(tr("Row duplicated."));
                 }
             }
             Action::AskDeleteRow(tree, uid) => self.ask_delete_row(tree, uid),
             Action::DeleteRow(tree, uid) => {
                 if self.state.session.delete_row(tree, uid) {
-                    self.set_status("Row deleted.");
+                    self.set_status(tr("Row deleted."));
                 }
             }
             Action::SetField { tree, uid, field, value } => {
                 if self.state.session.set_field(tree, uid, field, value) {
-                    self.set_status(format!("{} set to {value}.", field.column()));
+                    self.set_status(trf("{} set to {}.", &[&field.column(), &value]));
                 }
             }
             Action::SetEffectiveLevels { stage, skill_id, lv, min, max } => {
                 if self.state.session.set_effective_levels(stage, skill_id, lv, min, max) {
-                    self.set_status("Matrix change staged.");
+                    self.set_status(tr("Matrix change staged."));
                 }
             }
             Action::AskDeleteEffective { stage, skill_id, lv } => {
@@ -190,38 +195,38 @@ impl EditorApp {
                 }
                 let dialog = MessageDialog::new(
                     MessageKind::Warning,
-                    "Confirm delete",
-                    format!(
-                        "Delete {} ({skill_id}, Lv {lv}) from Evolution {stage}? This removes {linked} row(s).",
-                        self.state.session.skill_name(skill_id)
+                    tr("Confirm delete"),
+                    trf(
+                        "Delete {} ({}, Lv {}) from Evolution {}? This removes {} row(s).",
+                        &[&self.state.session.skill_name(skill_id), &skill_id, &lv, &stage, &linked],
                     ),
                 )
                 .button(
                     icons::DELETE,
-                    "Delete",
+                    tr("Delete"),
                     ButtonStyle::Danger,
                     Some(Action::DeleteEffective { stage, skill_id, lv }),
                 )
-                .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+                .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
                 self.push_dialog(Dialog::message(dialog));
             }
             Action::DeleteEffective { stage, skill_id, lv } => {
                 let removed = self.state.session.delete_effective(stage, skill_id, lv);
-                self.set_status(format!("Deleted {removed} row(s)."));
+                self.set_status(trf("Deleted {} row(s).", &[&removed]));
             }
 
             // ---- skills, groups, stats ----
             Action::EditSkill(skill_id) => {
                 self.worker.send(Command::LoadSkillRecord { skill_id });
-                self.set_status(format!("Loading skill {skill_id}…"));
+                self.set_status(trf("Loading skill {}…", &[&skill_id]));
             }
             Action::StageSkillUpdate(update) => {
                 let (skill_id, count) = (update.skill_id, update.changes.len());
                 self.state.session.stage_skill_update(update);
                 self.set_status(if count == 0 {
-                    format!("Skill {skill_id} has no staged changes.")
+                    trf("Skill {} has no staged changes.", &[&skill_id])
                 } else {
-                    format!("Skill {skill_id} staged for save ({count} column(s)).")
+                    trf("Skill {} staged for save ({} column(s)).", &[&skill_id, &count])
                 });
             }
             Action::CreateGroup(tree, uid) => self.worker.send(Command::NextRandomGroupId { tree, uid }),
@@ -248,27 +253,27 @@ impl EditorApp {
                 };
                 let dialog = MessageDialog::new(
                     MessageKind::Question,
-                    "Detach random group",
-                    format!("Detach random group {group_id} from this tree row? The group itself is not deleted."),
+                    tr("Detach random group"),
+                    trf("Detach random group {} from this tree row? The group itself is not deleted.", &[&group_id]),
                 )
-                .button(icons::DETACH, "Detach", ButtonStyle::Primary, Some(Action::DetachGroup(tree, uid)))
-                .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+                .button(icons::DETACH, tr("Detach"), ButtonStyle::Primary, Some(Action::DetachGroup(tree, uid)))
+                .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
                 self.push_dialog(Dialog::message(dialog));
             }
             Action::DetachGroup(tree, uid) => {
                 if self.state.session.detach_group(tree, uid) {
-                    self.set_status("Random group detached from the selected row.");
+                    self.set_status(tr("Random group detached from the selected row."));
                 }
             }
             Action::ApplyRandomGroup { tree, uid, group } => {
                 let (group_id, use_code) = (group.group_id, group.use_code());
                 if self.state.session.attach_group(tree, uid, group) {
-                    self.set_status(format!("Random group {group_id} staged (UseCode: {use_code})."));
+                    self.set_status(trf("Random group {} staged (UseCode: {}).", &[&group_id, &use_code]));
                 }
             }
             Action::ApplyScaling(result) => {
                 self.state.session.apply_scaling_edit(result);
-                self.set_status("Stat scaling changes staged.");
+                self.set_status(tr("Stat scaling changes staged."));
             }
 
             // ---- settings ----
@@ -277,7 +282,7 @@ impl EditorApp {
                 self.state.settings = *settings;
                 self.state.settings.save_to_sql_mode = save_to_sql_mode;
                 self.save_settings();
-                self.set_status("Settings saved.");
+                self.set_status(tr("Settings saved."));
                 if !self.state.demo {
                     self.connect();
                 }
@@ -295,11 +300,11 @@ impl EditorApp {
                 self.exit_prompt_open = true;
                 let dialog = MessageDialog::new(
                     MessageKind::Warning,
-                    "Unsaved changes",
-                    format!("{} staged change(s) have not been saved. Exit anyway?", self.state.session.change_count()),
+                    tr("Unsaved changes"),
+                    trf("{} staged change(s) have not been saved. Exit anyway?", &[&self.state.session.change_count()]),
                 )
-                .button(icons::DISCARD, "Discard and exit", ButtonStyle::Danger, Some(Action::Exit))
-                .button(icons::CLOSE, "Stay", ButtonStyle::Plain, Some(Action::CancelExit))
+                .button(icons::DISCARD, tr("Discard and exit"), ButtonStyle::Danger, Some(Action::Exit))
+                .button(icons::CLOSE, tr("Stay"), ButtonStyle::Plain, Some(Action::CancelExit))
                 .on_dismiss(Action::CancelExit);
                 self.push_dialog(Dialog::message(dialog));
             }
@@ -324,16 +329,14 @@ impl EditorApp {
         }
         let dialog = MessageDialog::new(
             MessageKind::Warning,
-            "Confirm delete",
-            format!(
-                "Delete {} ({skill_id}) from Evolution {}, Tree {}?",
-                session.skill_name(skill_id),
-                tree.stage,
-                tree.slot
+            tr("Confirm delete"),
+            trf(
+                "Delete {} ({}) from Evolution {}, Tree {}?",
+                &[&session.skill_name(skill_id), &skill_id, &tree.stage, &tree.slot],
             ),
         )
-        .button(icons::DELETE, "Delete", ButtonStyle::Danger, Some(Action::DeleteRow(tree, uid)))
-        .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, None);
+        .button(icons::DELETE, tr("Delete"), ButtonStyle::Danger, Some(Action::DeleteRow(tree, uid)))
+        .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, None);
         self.push_dialog(Dialog::message(dialog));
     }
 }

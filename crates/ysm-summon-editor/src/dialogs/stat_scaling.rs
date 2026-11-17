@@ -18,6 +18,7 @@ use crate::action::Action;
 use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, modal};
+use ysm_core::i18n::{tr, trf};
 
 /// One colour per stat, used for the stat names and the growth chart.
 const STAT_COLORS: [Color32; STAT_COUNT] = [
@@ -72,7 +73,7 @@ impl StatScalingDialog {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
-        let title = format!("Stat Scaling · {}", self.summon_name);
+        let title = trf("Stat Scaling · {}", &[&self.summon_name]);
         let mut apply = false;
         let mut cancelled = false;
 
@@ -106,18 +107,18 @@ impl StatScalingDialog {
 
             let dirty = self.draft.is_dirty();
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
-                if widgets::primary_button(ui, icons::CHECK, "Apply").clicked() {
+                if widgets::primary_button(ui, icons::CHECK, tr("Apply")).clicked() {
                     apply = true;
                 }
                 ui.add_space(space::MD);
-                if widgets::button_enabled(ui, dirty, icons::DISCARD, "Reset to database").clicked() {
+                if widgets::button_enabled(ui, dirty, icons::DISCARD, tr("Reset to database")).clicked() {
                     self.draft.reset();
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
-                    let text = if dirty { "Values differ from the database." } else { "No changes." };
+                    let text = if dirty { tr("Values differ from the database.") } else { tr("No changes.") };
                     ui.label(widgets::caption(text));
                 });
             });
@@ -132,10 +133,10 @@ impl StatScalingDialog {
     }
 
     fn base_stats(&mut self, ui: &mut Ui) {
-        section_heading(ui, "Base stats", &format!("StatResource {}", self.draft.stat_id()));
+        section_heading(ui, tr("Base stats"), &trf("StatResource {}", &[&self.draft.stat_id()]));
         stat_grid(ui, "base-stats", 2, |ui| {
-            header(ui, STAT_COLUMN_WIDTH, "Stat", "", Align::Min);
-            header(ui, BASE_FIELD_WIDTH, "Base", "", Align::Min);
+            header(ui, STAT_COLUMN_WIDTH, tr("Stat"), "", Align::Min);
+            header(ui, BASE_FIELD_WIDTH, tr("Base"), "", Align::Min);
             ui.end_row();
 
             for stat in Stat::ALL {
@@ -149,20 +150,20 @@ impl StatScalingDialog {
     }
 
     fn growth_bonuses(&mut self, ui: &mut Ui) {
-        section_heading(ui, "Growth bonus per level", "CreatureLevelBonus, one row per growth stage");
+        section_heading(ui, tr("Growth bonus per level"), tr("CreatureLevelBonus, one row per growth stage"));
         stat_grid(ui, "growth-bonus", 1 + self.draft.bonuses.len(), |ui| {
-            header(ui, STAT_COLUMN_WIDTH, "Stat", "", Align::Min);
+            header(ui, STAT_COLUMN_WIDTH, tr("Stat"), "", Align::Min);
             for bonus in &self.draft.bonuses {
                 let id = if bonus.exists_in_db {
-                    format!("ID {}", bonus.lookup_id)
+                    trf("ID {}", &[&bonus.lookup_id])
                 } else {
-                    format!("ID {} · new", bonus.lookup_id)
+                    trf("ID {} · new", &[&bonus.lookup_id])
                 };
-                header(ui, BONUS_FIELD_WIDTH, &format!("Stage {}", bonus.stage_index), &id, Align::Min).on_hover_text(
+                header(ui, BONUS_FIELD_WIDTH, &trf("Stage {}", &[&bonus.stage_index]), &id, Align::Min).on_hover_text(
                     if bonus.exists_in_db {
-                        "Existing CreatureLevelBonus row."
+                        tr("Existing CreatureLevelBonus row.")
                     } else {
-                        "No row in the database yet; it is created when a value is saved."
+                        tr("No row in the database yet; it is created when a value is saved.")
                     },
                 );
             }
@@ -191,16 +192,25 @@ impl StatScalingDialog {
         let percent = (result.stat_amplify * Decimal::from(100)).normalize();
         section_heading(
             ui,
-            "Calculator",
-            &format!(
-                "Level {} · enhance stage {} · stat amplify +{percent}%",
-                result.effective_level, result.effective_enhance_stage
+            tr("Calculator"),
+            &trf(
+                "Level {} · enhance stage {} · stat amplify +{}%",
+                &[&result.effective_level, &result.effective_enhance_stage, &percent],
             ),
         );
 
         stat_grid(ui, "scaling-result", 9, |ui| {
-            header(ui, STAT_COLUMN_WIDTH, "Stat", "", Align::Min);
-            for title in ["Base", "Growth 1", "Growth 2", "Growth 3", "Bonus", "Raw", "Final", "Per level"] {
+            header(ui, STAT_COLUMN_WIDTH, tr("Stat"), "", Align::Min);
+            for title in [
+                tr("Base"),
+                tr("Growth 1"),
+                tr("Growth 2"),
+                tr("Growth 3"),
+                tr("Bonus"),
+                tr("Raw"),
+                tr("Final"),
+                tr("Per level"),
+            ] {
                 header(ui, RESULT_COLUMN_WIDTH, title, "", Align::Max);
             }
             ui.end_row();
@@ -223,10 +233,10 @@ impl StatScalingDialog {
         ui.horizontal(|ui| {
             ui.set_height(theme::CONTROL_HEIGHT);
             ui.spacing_mut().slider_width = 152.0;
-            ui.label("Level");
+            ui.label(tr("Level"));
             ui.add(egui::Slider::new(&mut self.level, MIN_LEVEL..=MAX_LEVEL));
             ui.add_space(space::LG);
-            ui.label("Enhance");
+            ui.label(tr("Enhance"));
             ui.add(egui::Slider::new(&mut self.enhance_stage, 0..=MAX_ENHANCE_STAGE));
         });
         self.chart(ui);
@@ -268,7 +278,7 @@ impl StatScalingDialog {
         painter.text(
             plot.left_top(),
             egui::Align2::LEFT_TOP,
-            format!("Final stats by level · max {max_value:.0}"),
+            trf("Final stats by level · max {}", &[&format!("{max_value:.0}")]),
             theme::caption(),
             color::text_muted(),
         );
@@ -278,7 +288,7 @@ impl StatScalingDialog {
             let fraction = ((pointer.x - plot.left()) / plot.width()).clamp(0.0, 1.0);
             self.level = MIN_LEVEL + (fraction * (MAX_LEVEL - MIN_LEVEL) as f32).round() as i32;
         }
-        response.on_hover_text("Click or drag to choose the level");
+        response.on_hover_text(tr("Click or drag to choose the level"));
     }
 }
 

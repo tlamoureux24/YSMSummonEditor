@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use rust_decimal::Decimal;
 
 use crate::commit::{CommitRequest, SkillUpdate};
+use crate::i18n::{tr, trf};
 use crate::model::{EntryField, SkillTreeEntry, Stat};
 use crate::random_group::RandomSkillGroup;
 use crate::scaling_edit::{LevelBonusEdit, StatEdit};
@@ -56,21 +57,21 @@ pub fn build_review_rows(session: &EditSession, request: &CommitRequest) -> Vec<
 }
 
 fn tree_rows(change: &TreeChange, rows: &mut Vec<ReviewRow>) {
-    let location = format!("Evolution {} · Tree {} · #{}", change.tree.stage, change.tree.slot, change.tree_id);
+    let location = trf("Evolution {} · Tree {} · #{}", &[&change.tree.stage, &change.tree.slot, &change.tree_id]);
     match (change.kind, &change.before, &change.after) {
         (TreeChangeKind::Insert, _, Some(after)) => rows.push(ReviewRow {
             kind: ReviewKind::Insert,
-            category: "Skill tree",
+            category: tr("Skill tree"),
             target: location,
-            field: format!("skill {}", after.skill_id),
+            field: trf("skill {}", &[&after.skill_id]),
             before: String::new(),
             after: summarize_entry(after),
         }),
         (TreeChangeKind::Delete, Some(before), _) => rows.push(ReviewRow {
             kind: ReviewKind::Delete,
-            category: "Skill tree",
+            category: tr("Skill tree"),
             target: location,
-            field: format!("skill {}", before.skill_id),
+            field: trf("skill {}", &[&before.skill_id]),
             before: summarize_entry(before),
             after: String::new(),
         }),
@@ -78,8 +79,8 @@ fn tree_rows(change: &TreeChange, rows: &mut Vec<ReviewRow>) {
             for field in EntryField::ALL.into_iter().filter(|f| before.get(*f) != after.get(*f)) {
                 rows.push(ReviewRow {
                     kind: ReviewKind::Update,
-                    category: "Skill tree",
-                    target: format!("{location} · skill {}", before.skill_id),
+                    category: tr("Skill tree"),
+                    target: trf("{} · skill {}", &[&location, &before.skill_id]),
                     field: field.column().to_owned(),
                     before: before.get(field).to_string(),
                     after: after.get(field).to_string(),
@@ -92,17 +93,17 @@ fn tree_rows(change: &TreeChange, rows: &mut Vec<ReviewRow>) {
 
 fn summarize_entry(entry: &SkillTreeEntry) -> String {
     let mut text =
-        format!("lv {} · job {} · skill lv {}–{}", entry.lv, entry.job_lv, entry.min_skill_lv, entry.max_skill_lv);
+        trf("lv {} · job {} · skill lv {}–{}", &[&entry.lv, &entry.job_lv, &entry.min_skill_lv, &entry.max_skill_lv]);
     if entry.skill_group_id > 0 {
-        text.push_str(&format!(" · group {}", entry.skill_group_id));
+        text.push_str(&trf(" · group {}", &[&entry.skill_group_id]));
     }
     for i in 0..3 {
         if entry.need_skill_id[i] > 0 {
-            text.push_str(&format!(" · needs {} lv {}", entry.need_skill_id[i], entry.need_skill_lv[i]));
+            text.push_str(&trf(" · needs {} lv {}", &[&entry.need_skill_id[i], &entry.need_skill_lv[i]]));
         }
     }
     if entry.cenhance_min != 0 || entry.cenhance_max != 0 {
-        text.push_str(&format!(" · enhance {}–{}", entry.cenhance_min, entry.cenhance_max));
+        text.push_str(&trf(" · enhance {}–{}", &[&entry.cenhance_min, &entry.cenhance_max]));
     }
     text
 }
@@ -111,8 +112,8 @@ fn skill_rows(update: &SkillUpdate, rows: &mut Vec<ReviewRow>) {
     for change in &update.changes {
         rows.push(ReviewRow {
             kind: ReviewKind::Update,
-            category: "Skill",
-            target: format!("Skill {}", update.skill_id),
+            category: tr("Skill"),
+            target: trf("Skill {}", &[&update.skill_id]),
             field: change.name.clone(),
             before: display_or_null(&change.old),
             after: display_or_null(&change.new),
@@ -130,8 +131,8 @@ fn stat_rows(edit: &StatEdit, rows: &mut Vec<ReviewRow>) {
         if before != after {
             rows.push(ReviewRow {
                 kind: ReviewKind::Update,
-                category: "Stat",
-                target: format!("Stat {}", edit.commit.original_stat_id),
+                category: tr("Stat"),
+                target: trf("Stat {}", &[&edit.commit.original_stat_id]),
                 field: stat.column().to_owned(),
                 before: before.to_string(),
                 after: after.to_string(),
@@ -146,8 +147,8 @@ fn bonus_rows(edit: &LevelBonusEdit, rows: &mut Vec<ReviewRow>) {
         if before != after {
             rows.push(ReviewRow {
                 kind: if edit.exists_in_db { ReviewKind::Update } else { ReviewKind::Insert },
-                category: "Growth bonus",
-                target: format!("Bonus {}", edit.upsert.bonus_id),
+                category: tr("Growth bonus"),
+                target: trf("Bonus {}", &[&edit.upsert.bonus_id]),
                 field: stat.column().to_owned(),
                 before: if edit.exists_in_db { format_bonus(before) } else { String::new() },
                 after: format_bonus(after),
@@ -163,11 +164,11 @@ fn format_bonus(value: Decimal) -> String {
 fn group_rows(group: &RandomSkillGroup, db: Option<&RandomSkillGroup>, rows: &mut Vec<ReviewRow>) {
     let kind = if db.is_some() { ReviewKind::Update } else { ReviewKind::Insert };
     let join = |g: &RandomSkillGroup| g.skill_ids().iter().map(i32::to_string).collect::<Vec<_>>().join(", ");
-    let target = format!("Group {}", group.group_id);
+    let target = trf("Group {}", &[&group.group_id]);
 
     rows.push(ReviewRow {
         kind,
-        category: "Random group",
+        category: tr("Random group"),
         target: target.clone(),
         field: "use_code".to_owned(),
         before: db.map(|g| g.use_code().to_string()).unwrap_or_default(),
@@ -175,7 +176,7 @@ fn group_rows(group: &RandomSkillGroup, db: Option<&RandomSkillGroup>, rows: &mu
     });
     rows.push(ReviewRow {
         kind,
-        category: "Random group",
+        category: tr("Random group"),
         target,
         field: "skills".to_owned(),
         before: db.map(join).unwrap_or_default(),

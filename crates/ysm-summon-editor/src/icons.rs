@@ -48,6 +48,7 @@ pub const CONNECTION: &str = ph::PLUGS_CONNECTED;
 pub const THEME_DARK: &str = ph::MOON;
 pub const THEME_LIGHT: &str = ph::SUN;
 pub const THEME_SYSTEM: &str = ph::DESKTOP;
+pub const LANGUAGE: &str = ph::TRANSLATE;
 pub const NO_CONNECTION: &str = ph::PLUGS;
 pub const IMAGES: &str = ph::IMAGES;
 pub const CLIPBOARD: &str = ph::CLIPBOARD_TEXT;

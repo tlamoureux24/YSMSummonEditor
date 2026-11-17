@@ -28,12 +28,15 @@ use crate::widgets::toast::{ToastKind, Toasts};
 use crate::worker::{Command, WorkerHandle};
 
 use save_flow::SaveFlow;
+use ysm_core::i18n::{self, Language, tr, trf};
 
 /// Delay between the last keystroke in the search box and the live search.
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(250);
 
 pub struct EditorApp {
     state: AppState,
+    /// The operating system's language, used until one is chosen in Settings.
+    system_language: Language,
     worker: WorkerHandle,
     textures: TextureStore,
     settings_store: SettingsStore,
@@ -60,12 +63,14 @@ impl EditorApp {
     pub fn new(cc: &eframe::CreationContext<'_>, demo: bool) -> Self {
         let ctx = &cc.egui_ctx;
         theme::apply(ctx);
+        let system_language = sys_locale::get_locale().map_or(Language::English, |l| Language::from_locale(&l));
+        i18n::set_language(system_language);
 
         let mut toasts = Toasts::default();
         let mut notes: Vec<String> = Vec::new();
         let settings_store = SettingsStore::at_default_location();
         let mut settings = settings_store.load().unwrap_or_else(|error| {
-            toasts.push(ToastKind::Error, format!("Settings could not be read, using defaults. {error}"));
+            toasts.push(ToastKind::Error, trf("Settings could not be read, using defaults. {}", &[&error]));
             AppSettings::default()
         });
 
@@ -75,25 +80,29 @@ impl EditorApp {
         {
             settings.database = database;
             let file = path.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
-            notes.push(format!("Loaded DB defaults from {file}."));
+            notes.push(trf("Loaded DB defaults from {}.", &[&file]));
         }
 
         match ensure_default_dump_folder(&mut settings) {
             Ok(true) => {
-                notes.push("Dump folder defaulted to Desktop\\Dump.".to_owned());
+                notes.push(tr("Dump folder defaulted to Desktop\\Dump.").to_owned());
                 if let Err(error) = settings_store.save(&settings) {
-                    toasts.push(ToastKind::Warning, format!("Settings could not be saved. {error}"));
+                    toasts.push(ToastKind::Warning, trf("Settings could not be saved. {}", &[&error]));
                 }
             }
             Ok(false) => {}
-            Err(error) => toasts.push(ToastKind::Warning, format!("Default dump folder could not be created. {error}")),
+            Err(error) => {
+                toasts.push(ToastKind::Warning, trf("Default dump folder could not be created. {}", &[&error]))
+            }
         }
 
+        i18n::set_language(settings.language.unwrap_or(system_language));
         let mut state = AppState::new(settings, demo);
         state.status = notes.join(" ");
 
         let mut app = Self {
             state,
+            system_language,
             worker: WorkerHandle::spawn(ctx.clone()),
             textures: TextureStore::new(ctx),
             settings_store,
@@ -123,11 +132,16 @@ impl EditorApp {
             self.worker.send(Command::UseDemo);
         } else if self.state.settings.database.is_configured() {
             self.state.connection = ConnectionStatus::Connecting;
-            self.worker.send(Command::Connect(self.state.settings.database.clone()));
+            self.worker.send(Command::Connect(self.state.settings.database.clone(), self.language()));
         } else {
             self.state.connection = ConnectionStatus::NotConfigured;
-            self.append_status("Database is not configured. Add .env.local or set values in Settings.");
+            self.append_status(tr("Database is not configured. Add .env.local or set values in Settings."));
         }
+    }
+
+    /// The interface language: the one chosen in Settings, else the system's.
+    fn language(&self) -> Language {
+        self.state.settings.language.unwrap_or(self.system_language)
     }
 
     fn rebuild_assets(&mut self) {
@@ -153,19 +167,19 @@ impl EditorApp {
 
     fn save_settings(&mut self) {
         if let Err(error) = self.settings_store.save(&self.state.settings) {
-            self.toasts.push(ToastKind::Error, format!("Settings could not be saved. {error}"));
+            self.toasts.push(ToastKind::Error, trf("Settings could not be saved. {}", &[&error]));
         }
     }
 
     fn search_summons(&mut self) {
         self.state.search_edited_at = None;
         if !self.state.connection.is_ready() {
-            self.set_status("Search skipped. Database is not connected.");
+            self.set_status(tr("Search skipped. Database is not connected."));
             return;
         }
         self.summon_generation += 1;
         self.state.summons_loading = true;
-        self.set_status("Loading summons…");
+        self.set_status(tr("Loading summons…"));
         self.worker
             .send(Command::SearchSummons { filter: self.state.summon_filter(), generation: self.summon_generation });
     }
@@ -178,7 +192,7 @@ impl EditorApp {
         self.state.selected_row = None;
         self.state.selected_effective = None;
         self.state.chain_loading = true;
-        self.set_status("Loading evolution chain…");
+        self.set_status(tr("Loading evolution chain…"));
         self.worker.send(Command::LoadChain { summon: summon.clone(), generation: self.chain_generation });
         self.current_summon = Some(summon);
     }
@@ -317,6 +331,7 @@ impl eframe::App for EditorApp {
     fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         let ctx = ui.ctx().clone();
         theme::follow(&ctx, self.state.settings.theme);
+        i18n::set_language(self.language());
 
         self.textures.poll();
         if !self.worker.is_alive() && !std::mem::replace(&mut self.worker_failure_reported, true) {
@@ -326,7 +341,7 @@ impl eframe::App for EditorApp {
             self.state.chain_loading = false;
             self.toasts.push(
                 ToastKind::Error,
-                "The background worker stopped, so the database can no longer be reached. Restart the application.",
+                tr("The background worker stopped, so the database can no longer be reached. Restart the application."),
             );
         }
         while let Some(event) = self.worker.try_recv() {

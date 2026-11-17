@@ -10,6 +10,7 @@ use crate::action::Action;
 use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, ColumnAlign, RowBand, Segment, header_cell, modal};
+use ysm_core::i18n::{tr, trf};
 
 const GRID_HEIGHT: f32 = 440.0;
 
@@ -125,17 +126,17 @@ impl SkillEditDialog {
     }
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
-        let title = format!("Skill {} · {}", self.skill_id, self.skill_name);
+        let title = trf("Skill {} · {}", &[&self.skill_id, &self.skill_name]);
         let mut apply = false;
         let mut cancelled = false;
 
         let outcome = modal::show(ctx, id, icons::EDIT, color::accent_bright(), &title, 784.0, |ui| {
             let business = self.rows.iter().filter(|row| row.business).count();
-            let business_label = format!("Business fields · {business}");
-            let all_label = format!("All columns · {}", self.rows.len());
+            let business_label = trf("Business fields · {}", &[&business]);
+            let all_label = trf("All columns · {}", &[&self.rows.len()]);
             let segments = [
-                Segment { icon: "", label: &business_label, tooltip: "The columns that are changed most often" },
-                Segment { icon: "", label: &all_label, tooltip: "Every column of SkillResource" },
+                Segment { icon: "", label: &business_label, tooltip: tr("The columns that are changed most often") },
+                Segment { icon: "", label: &all_label, tooltip: tr("Every column of SkillResource") },
             ];
             let tab = &mut self.tab;
             let filter = &mut self.filter;
@@ -149,8 +150,8 @@ impl SkillEditDialog {
                 },
                 |ui| {
                     let field = widgets::sized_text_field(filter, 200.0);
-                    ui.add(field.hint_text(format!("{}  Filter columns", icons::SEARCH)));
-                    ui.checkbox(only_changed, "Changed only");
+                    ui.add(field.hint_text(trf("{}  Filter columns", &[&icons::SEARCH])));
+                    ui.checkbox(only_changed, tr("Changed only"));
                 },
             );
 
@@ -160,8 +161,8 @@ impl SkillEditDialog {
                     widgets::empty_state(
                         ui,
                         icons::SEARCH,
-                        "No columns match",
-                        "Clear the filter to see every column.",
+                        tr("No columns match"),
+                        tr("Clear the filter to see every column."),
                     );
                 });
             } else {
@@ -171,19 +172,24 @@ impl SkillEditDialog {
             let changed = self.changed_count();
             let has_errors = self.has_errors();
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
-                if widgets::primary_button_enabled(ui, !has_errors, icons::CHECK, "Apply").clicked() {
+                if widgets::primary_button_enabled(ui, !has_errors, icons::CHECK, tr("Apply")).clicked() {
                     apply = true;
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     if has_errors {
-                        modal::note(ui, icons::WARNING, "Fix the highlighted values before applying.", color::danger());
+                        modal::note(
+                            ui,
+                            icons::WARNING,
+                            tr("Fix the highlighted values before applying."),
+                            color::danger(),
+                        );
                     } else if changed == 0 {
-                        ui.label(widgets::caption("No changes"));
+                        ui.label(widgets::caption(tr("No changes")));
                     } else {
-                        ui.label(widgets::caption(format!("{changed} column(s) changed")));
+                        ui.label(widgets::caption(trf("{} column(s) changed", &[&changed])));
                     }
                 });
             });
@@ -213,7 +219,9 @@ impl SkillEditDialog {
             .column(Column::exact(144.0).clip(true))
             .column(Column::exact(theme::CONTROL_HEIGHT))
             .header(theme::HEADER_HEIGHT, |mut header| {
-                for (index, title) in ["Column", "Type", "Value", "In database", ""].into_iter().enumerate() {
+                for (index, title) in
+                    [tr("Column"), tr("Type"), tr("Value"), tr("In database"), ""].into_iter().enumerate()
+                {
                     header.col(|ui| {
                         if index == 0 {
                             ui.add_space(space::SM);
@@ -246,7 +254,8 @@ impl SkillEditDialog {
                         ui.add(egui::Label::new(widgets::muted(original)).truncate()).on_hover_text(&row.db_text);
                     });
                     table_row.col(|ui| {
-                        if dirty && widgets::icon_button(ui, icons::DISCARD, "Restore the database value").clicked() {
+                        if dirty && widgets::icon_button(ui, icons::DISCARD, tr("Restore the database value")).clicked()
+                        {
                             row.text = row.db_text.clone();
                             row.error = None;
                         }
@@ -258,7 +267,7 @@ impl SkillEditDialog {
 
 fn value_editor(ui: &mut Ui, row: &mut FieldRow) {
     if row.read_only {
-        ui.label(widgets::muted(row.text.as_str())).on_hover_text("This column cannot be edited.");
+        ui.label(widgets::muted(row.text.as_str())).on_hover_text(tr("This column cannot be edited."));
         return;
     }
 

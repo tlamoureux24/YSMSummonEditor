@@ -8,6 +8,7 @@ use crate::action::Action;
 use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets;
+use ysm_core::i18n::{tr, trf};
 
 /// Height of the card's content: name row, two text lines and the chain.
 const CONTENT_HEIGHT: f32 = 152.0;
@@ -56,14 +57,14 @@ fn placeholder(ui: &mut Ui, loading: bool) {
         ui.horizontal(|ui| {
             ui.set_height(theme::ICON_SIZE);
             ui.spinner();
-            ui.label(widgets::muted("Loading evolution chain…"));
+            ui.label(widgets::muted(tr("Loading evolution chain…")));
         });
     } else {
         ui.horizontal(|ui| {
             ui.set_height(theme::ICON_SIZE);
-            ui.label(RichText::new("No selection").font(theme::bold(theme::TITLE_SIZE)).color(color::text_muted()));
+            ui.label(RichText::new(tr("No selection")).font(theme::bold(theme::TITLE_SIZE)).color(color::text_muted()));
         });
-        ui.label(widgets::muted("Pick a summon from the list to load its evolution chain and skill trees."));
+        ui.label(widgets::muted(tr("Pick a summon from the list to load its evolution chain and skill trees.")));
     }
 }
 
@@ -89,13 +90,13 @@ fn details(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionChain) {
     ui.add_space(space::XS);
     match summon.feature_text.as_deref().map(str::trim).filter(|text| !text.is_empty()) {
         Some(feature) => ui.add(egui::Label::new(feature).truncate()),
-        None => ui.label(widgets::muted("No description.")),
+        None => ui.label(widgets::muted(tr("No description."))),
     };
     ui.label(widgets::caption(format!(
         "ID {}   ·   {}  {} ({})",
         summon.summon_id,
         icons::CARD,
-        summon.card_name.as_deref().unwrap_or("Unknown card"),
+        summon.card_name.as_deref().unwrap_or(tr("Unknown card")),
         summon.card_id
     )));
 
@@ -149,7 +150,7 @@ fn evolution_chain(ui: &mut Ui, view: &mut ViewContext<'_>, chain: &EvolutionCha
 
         let response = ui
             .interact(icon_rect, ui.id().with(("chain-stage", stage)), Sense::click())
-            .on_hover_text(format!("Evolution {stage}: {}", summon.summon_name))
+            .on_hover_text(trf("Evolution {}: {}", &[&stage, &summon.summon_name]))
             .on_hover_cursor(egui::CursorIcon::PointingHand);
         if response.clicked() {
             view.actions.push(Action::SetStage(stage));

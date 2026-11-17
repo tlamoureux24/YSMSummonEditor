@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use ysm_core::commit::{CommitRequest, CommitResult};
+use ysm_core::i18n::Language;
 use ysm_core::model::{
     CreatureEnhance, LevelBonusUsage, RandomGroupUsage, SkillDisplay, SkillTreeEntry, SkillUsage, StatScalingSnapshot,
     StatUsage, SummonListFilter, SummonListItem, TreeUsage,
@@ -18,6 +19,10 @@ pub const SKILL_SEARCH_LIMIT: usize = 300;
 /// Methods block; callers run them off the UI thread. Lookups by a list of
 /// IDs return an empty result for an empty list without touching the database.
 pub trait SummonRepository: Send {
+    /// Language of the game texts read from now on (names, tooltips). A
+    /// repository with a single text table ignores it.
+    fn set_text_language(&mut self, _language: Language) {}
+
     /// Verifies the connection and returns a short description of the server.
     fn test_connection(&mut self) -> Result<String>;
 

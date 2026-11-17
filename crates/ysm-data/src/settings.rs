@@ -133,6 +133,9 @@ pub struct AppSettings {
     pub save_to_sql_mode: bool,
     /// Missing in older files: dark, the original look.
     pub theme: ThemeChoice,
+    /// Interface language, also used for the game texts. Unset: the
+    /// operating system's language when it is French, English otherwise.
+    pub language: Option<ysm_core::i18n::Language>,
 }
 
 pub struct SettingsStore {

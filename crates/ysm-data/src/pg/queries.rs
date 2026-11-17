@@ -37,10 +37,10 @@ const SUMMON_PROJECTION: &str = "
         s.skill_tree4_id,
         s.skill_tree5_id
     FROM SummonResource s
-    LEFT JOIN StringResource sn ON s.name_id = sn.code
-    LEFT JOIN StringResource sf ON s.text_feature_id = sf.code
+    LEFT JOIN {texts} sn ON s.name_id = sn.code
+    LEFT JOIN {texts} sf ON s.text_feature_id = sf.code
     LEFT JOIN ItemResource ir ON s.card_id = ir.id
-    LEFT JOIN StringResource cn ON ir.name_id = cn.code
+    LEFT JOIN {texts} cn ON ir.name_id = cn.code
 ";
 
 /// Renders IDs as a literal list for `IN (...)`. Safe: the values are integers.
@@ -72,17 +72,21 @@ pub(super) async fn server_version(client: &Client) -> PgResult<String> {
     Ok(format!("PostgreSQL {}", version.split_whitespace().next().unwrap_or_default()))
 }
 
-pub(super) async fn summon_by_id(client: &Client, summon_id: i32) -> PgResult<Option<SummonListItem>> {
-    let sql = format!("{SUMMON_PROJECTION} WHERE s.id = $1");
+pub(super) async fn summon_by_id(client: &Client, texts: &str, summon_id: i32) -> PgResult<Option<SummonListItem>> {
+    let sql = format!("{SUMMON_PROJECTION} WHERE s.id = $1").replace("{texts}", texts);
     Ok(client.query_opt(&sql, &[&summon_id]).await?.as_ref().map(summon))
 }
 
-pub(super) async fn summons_by_card_id(client: &Client, card_id: i32) -> PgResult<Vec<SummonListItem>> {
-    let sql = format!("{SUMMON_PROJECTION} WHERE s.card_id = $1 ORDER BY s.id");
+pub(super) async fn summons_by_card_id(client: &Client, texts: &str, card_id: i32) -> PgResult<Vec<SummonListItem>> {
+    let sql = format!("{SUMMON_PROJECTION} WHERE s.card_id = $1 ORDER BY s.id").replace("{texts}", texts);
     Ok(client.query(&sql, &[&card_id]).await?.iter().map(summon).collect())
 }
 
-pub(super) async fn search_summons(client: &Client, filter: &SummonListFilter) -> PgResult<Vec<SummonListItem>> {
+pub(super) async fn search_summons(
+    client: &Client,
+    texts: &str,
+    filter: &SummonListFilter,
+) -> PgResult<Vec<SummonListItem>> {
     // $1 IncludeNonForm1, $2 IncludeRidingOnly, $3 ShowAllEvolutions,
     // $4 SearchText, $5 ExactSummonId, $6 SearchLike
     let sql = format!(
@@ -100,7 +104,8 @@ pub(super) async fn search_summons(client: &Client, filter: &SummonListFilter) -
         ORDER BY
             CASE WHEN $5 IS NOT NULL AND s.id = $5 THEN 0 ELSE 1 END,
             s.id"
-    );
+    )
+    .replace("{texts}", texts);
 
     let search = filter.search_text.trim();
     let exact_id: Option<i32> = search.parse().ok();
@@ -259,8 +264,8 @@ const SKILL_DISPLAY_COLUMNS: &str = "
     NULLIF(BTRIM(s.icon_file_name), ''),
     tip_sr.value
     FROM SkillResource s
-    LEFT JOIN StringResource name_sr ON s.text_id = name_sr.code
-    LEFT JOIN StringResource tip_sr ON s.tooltip_id = tip_sr.code";
+    LEFT JOIN {texts} name_sr ON s.text_id = name_sr.code
+    LEFT JOIN {texts} tip_sr ON s.tooltip_id = tip_sr.code";
 
 fn skill_display_row(row: &Row) -> SkillDisplay {
     let mut c = Cells::new(row);
@@ -272,15 +277,25 @@ fn skill_display_row(row: &Row) -> SkillDisplay {
     }
 }
 
-pub(super) async fn skill_display(client: &Client, skill_ids: &[i32]) -> PgResult<HashMap<i32, SkillDisplay>> {
+pub(super) async fn skill_display(
+    client: &Client,
+    texts: &str,
+    skill_ids: &[i32],
+) -> PgResult<HashMap<i32, SkillDisplay>> {
     if skill_ids.is_empty() {
         return Ok(HashMap::new());
     }
-    let sql = format!("SELECT {SKILL_DISPLAY_COLUMNS} WHERE s.id IN ({}) ORDER BY s.id", in_list(skill_ids));
+    let sql = format!("SELECT {SKILL_DISPLAY_COLUMNS} WHERE s.id IN ({}) ORDER BY s.id", in_list(skill_ids))
+        .replace("{texts}", texts);
     Ok(client.query(&sql, &[]).await?.iter().map(skill_display_row).map(|d| (d.skill_id, d)).collect())
 }
 
-pub(super) async fn search_skills(client: &Client, text: &str, limit: usize) -> PgResult<Vec<SkillDisplay>> {
+pub(super) async fn search_skills(
+    client: &Client,
+    texts: &str,
+    text: &str,
+    limit: usize,
+) -> PgResult<Vec<SkillDisplay>> {
     // $1 SearchText, $2 ExactSkillId, $3 SearchLike; the limit is an integer literal.
     let limit = limit.clamp(1, crate::repository::SKILL_SEARCH_LIMIT);
     let sql = format!(
@@ -294,7 +309,8 @@ pub(super) async fn search_skills(client: &Client, text: &str, limit: usize) -> 
             CASE WHEN $2 IS NOT NULL AND s.id = $2 THEN 0 ELSE 1 END,
             s.id
         LIMIT {limit}"
-    );
+    )
+    .replace("{texts}", texts);
 
     let search = text.trim();
     let exact_id: Option<i32> = search.parse().ok();
@@ -342,7 +358,7 @@ pub(super) async fn next_random_group_id(client: &Client) -> PgResult<i32> {
     Ok(Cells::new(&row).i32().max(1))
 }
 
-pub(super) async fn skill_usage(client: &Client, skill_ids: &[i32]) -> PgResult<Vec<SkillUsage>> {
+pub(super) async fn skill_usage(client: &Client, texts: &str, skill_ids: &[i32]) -> PgResult<Vec<SkillUsage>> {
     if skill_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -356,7 +372,7 @@ pub(super) async fn skill_usage(client: &Client, skill_ids: &[i32]) -> PgResult<
         FROM SkillTreeResource st
         INNER JOIN SummonResource s
             ON st.skill_tree_id IN (s.skill_tree1_id, s.skill_tree2_id, s.skill_tree3_id, s.skill_tree4_id, s.skill_tree5_id)
-        LEFT JOIN StringResource sr ON s.name_id = sr.code
+        LEFT JOIN {texts} sr ON s.name_id = sr.code
         WHERE st.skill_id IN ({})
         ORDER BY 1, 3, 2",
         in_list(skill_ids)
@@ -372,7 +388,7 @@ pub(super) async fn skill_usage(client: &Client, skill_ids: &[i32]) -> PgResult<
         .collect())
 }
 
-pub(super) async fn tree_usage(client: &Client, skill_tree_ids: &[i32]) -> PgResult<Vec<TreeUsage>> {
+pub(super) async fn tree_usage(client: &Client, texts: &str, skill_tree_ids: &[i32]) -> PgResult<Vec<TreeUsage>> {
     if skill_tree_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -390,7 +406,7 @@ pub(super) async fn tree_usage(client: &Client, skill_tree_ids: &[i32]) -> PgRes
             (s.skill_tree4_id, 4),
             (s.skill_tree5_id, 5)
         ) x(skill_tree_id, tree_slot)
-        LEFT JOIN StringResource sr ON s.name_id = sr.code
+        LEFT JOIN {texts} sr ON s.name_id = sr.code
         WHERE x.skill_tree_id IN ({})
         ORDER BY x.skill_tree_id, s.id, x.tree_slot",
         in_list(skill_tree_ids)
@@ -407,7 +423,7 @@ pub(super) async fn tree_usage(client: &Client, skill_tree_ids: &[i32]) -> PgRes
         .collect())
 }
 
-pub(super) async fn stat_usage(client: &Client, stat_ids: &[i32]) -> PgResult<Vec<StatUsage>> {
+pub(super) async fn stat_usage(client: &Client, texts: &str, stat_ids: &[i32]) -> PgResult<Vec<StatUsage>> {
     if stat_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -415,7 +431,7 @@ pub(super) async fn stat_usage(client: &Client, stat_ids: &[i32]) -> PgResult<Ve
         "
         SELECT s.stat_id, s.id, COALESCE(sr.value, CONCAT('Summon ', s.id))
         FROM SummonResource s
-        LEFT JOIN StringResource sr ON s.name_id = sr.code
+        LEFT JOIN {texts} sr ON s.name_id = sr.code
         WHERE s.stat_id IN ({})
         ORDER BY s.stat_id, s.id",
         in_list(stat_ids)
@@ -431,7 +447,11 @@ pub(super) async fn stat_usage(client: &Client, stat_ids: &[i32]) -> PgResult<Ve
         .collect())
 }
 
-pub(super) async fn level_bonus_usage(client: &Client, bonus_ids: &[i32]) -> PgResult<Vec<LevelBonusUsage>> {
+pub(super) async fn level_bonus_usage(
+    client: &Client,
+    texts: &str,
+    bonus_ids: &[i32],
+) -> PgResult<Vec<LevelBonusUsage>> {
     if bonus_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -447,7 +467,7 @@ pub(super) async fn level_bonus_usage(client: &Client, bonus_ids: &[i32]) -> PgR
             (2, s.id - (depth_map.growth_depth - 2)),
             (3, s.id - (depth_map.growth_depth - 3))
         ) b(stage_index, bonus_id)
-        LEFT JOIN StringResource sr ON s.name_id = sr.code
+        LEFT JOIN {texts} sr ON s.name_id = sr.code
         WHERE b.stage_index <= depth_map.growth_depth
           AND b.bonus_id IN ({})
         ORDER BY b.bonus_id, s.id, b.stage_index",
@@ -464,7 +484,11 @@ pub(super) async fn level_bonus_usage(client: &Client, bonus_ids: &[i32]) -> PgR
         .collect())
 }
 
-pub(super) async fn random_group_usage(client: &Client, group_ids: &[i32]) -> PgResult<Vec<RandomGroupUsage>> {
+pub(super) async fn random_group_usage(
+    client: &Client,
+    texts: &str,
+    group_ids: &[i32],
+) -> PgResult<Vec<RandomGroupUsage>> {
     if group_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -486,7 +510,7 @@ pub(super) async fn random_group_usage(client: &Client, group_ids: &[i32]) -> Pg
             (4, sm.skill_tree4_id),
             (5, sm.skill_tree5_id)
         ) tree_slot(slot_index, tree_id)
-        LEFT JOIN StringResource sr ON sm.name_id = sr.code
+        LEFT JOIN {texts} sr ON sm.name_id = sr.code
         WHERE s.skill_group_id IN ({})
           AND tree_slot.tree_id = s.skill_tree_id
         ORDER BY 1, 3, 5, 2",

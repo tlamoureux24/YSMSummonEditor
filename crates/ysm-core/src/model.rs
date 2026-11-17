@@ -1,5 +1,6 @@
 //! Domain records shared by the data layer, the edit session and the UI.
 
+use crate::i18n::tr;
 use rust_decimal::Decimal;
 
 /// Every summon has exactly five skill tree slots.
@@ -205,35 +206,35 @@ impl EntryField {
     pub fn header(self) -> &'static str {
         match self {
             EntryField::SkillId => "ID",
-            EntryField::SkillGroupId => "Grp",
-            EntryField::MinSkillLv => "Min",
-            EntryField::MaxSkillLv => "Max",
-            EntryField::Lv => "Lv",
-            EntryField::JobLv => "Job",
+            EntryField::SkillGroupId => tr("Grp"),
+            EntryField::MinSkillLv => tr("Min"),
+            EntryField::MaxSkillLv => tr("Max"),
+            EntryField::Lv => tr("Lv"),
+            EntryField::JobLv => tr("Job"),
             EntryField::NeedSkillId(0) => "N1",
             EntryField::NeedSkillId(1) => "N2",
             EntryField::NeedSkillId(_) => "N3",
-            EntryField::NeedSkillLv(0) => "N1 Lv",
-            EntryField::NeedSkillLv(1) => "N2 Lv",
-            EntryField::NeedSkillLv(_) => "N3 Lv",
-            EntryField::CEnhanceMin => "E Min",
-            EntryField::CEnhanceMax => "E Max",
+            EntryField::NeedSkillLv(0) => tr("N1 Lv"),
+            EntryField::NeedSkillLv(1) => tr("N2 Lv"),
+            EntryField::NeedSkillLv(_) => tr("N3 Lv"),
+            EntryField::CEnhanceMin => tr("E Min"),
+            EntryField::CEnhanceMax => tr("E Max"),
         }
     }
 
     /// Longer description shown as a header tooltip.
     pub fn description(self) -> &'static str {
         match self {
-            EntryField::SkillId => "Skill ID (SkillResource.id)",
-            EntryField::SkillGroupId => "Random skill group ID (0 = none)",
-            EntryField::MinSkillLv => "Minimum skill level",
-            EntryField::MaxSkillLv => "Maximum skill level",
-            EntryField::Lv => "Required summon level",
-            EntryField::JobLv => "Required job level",
-            EntryField::NeedSkillId(_) => "Prerequisite skill ID",
-            EntryField::NeedSkillLv(_) => "Prerequisite skill level",
-            EntryField::CEnhanceMin => "Minimum creature enhance stage",
-            EntryField::CEnhanceMax => "Maximum creature enhance stage",
+            EntryField::SkillId => tr("Skill ID (SkillResource.id)"),
+            EntryField::SkillGroupId => tr("Random skill group ID (0 = none)"),
+            EntryField::MinSkillLv => tr("Minimum skill level"),
+            EntryField::MaxSkillLv => tr("Maximum skill level"),
+            EntryField::Lv => tr("Required summon level"),
+            EntryField::JobLv => tr("Required job level"),
+            EntryField::NeedSkillId(_) => tr("Prerequisite skill ID"),
+            EntryField::NeedSkillLv(_) => tr("Prerequisite skill level"),
+            EntryField::CEnhanceMin => tr("Minimum creature enhance stage"),
+            EntryField::CEnhanceMax => tr("Maximum creature enhance stage"),
         }
     }
 }

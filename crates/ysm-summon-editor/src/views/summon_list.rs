@@ -11,6 +11,7 @@ use crate::state::{AppState, ConnectionStatus};
 use crate::textures::TextureStore;
 use crate::theme::{self, color, space};
 use crate::widgets;
+use ysm_core::i18n::{tr, trf};
 
 /// Takes the state mutably because the search box and filter toggles are
 /// bound to it directly; everything else still goes through actions.
@@ -53,18 +54,19 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
             .config(keep_open)
             .ui(ui, |ui| {
                 ui.set_min_width(220.0);
-                let mut changed = ui.checkbox(&mut state.filter.final_only, "Final evolutions only").changed();
-                changed |= ui.checkbox(&mut state.filter.include_riding_only, "Include riding-only summons").changed();
+                let mut changed = ui.checkbox(&mut state.filter.final_only, tr("Final evolutions only")).changed();
+                changed |=
+                    ui.checkbox(&mut state.filter.include_riding_only, tr("Include riding-only summons")).changed();
                 if changed {
                     actions.push(Action::Search);
                 }
             })
             .0
-            .on_hover_text("Filter the list");
+            .on_hover_text(tr("Filter the list"));
 
         let search = ui.add(
             widgets::text_field(&mut state.search_text)
-                .hint_text(format!("{}  Search by ID, name or card", icons::SEARCH))
+                .hint_text(trf("{}  Search by ID, name or card", &[&icons::SEARCH]))
                 .desired_width(f32::INFINITY),
         );
         if std::mem::take(&mut state.focus_search) {
@@ -85,9 +87,9 @@ fn count_row(ui: &mut Ui, state: &AppState) {
         ui.set_height(16.0);
         if state.summons_loading {
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
-            ui.label(widgets::caption("Loading summons…"));
+            ui.label(widgets::caption(tr("Loading summons…")));
         } else {
-            ui.label(widgets::caption(format!("{} summons", state.summons.len())));
+            ui.label(widgets::caption(trf("{} summons", &[&state.summons.len()])));
         }
     });
 }
@@ -96,15 +98,20 @@ fn list(ui: &mut Ui, state: &AppState, textures: &mut TextureStore, actions: &mu
     if state.summons.is_empty() && !state.summons_loading {
         match &state.connection {
             ConnectionStatus::NotConfigured | ConnectionStatus::Failed(_) => {
-                widgets::empty_state(ui, icons::NO_CONNECTION, "No database connection", "Set it up to load summons.");
+                widgets::empty_state(
+                    ui,
+                    icons::NO_CONNECTION,
+                    tr("No database connection"),
+                    tr("Set it up to load summons."),
+                );
                 ui.vertical_centered(|ui| {
-                    if widgets::button(ui, icons::SETTINGS, "Open Settings").clicked() {
+                    if widgets::button(ui, icons::SETTINGS, tr("Open Settings")).clicked() {
                         actions.push(Action::OpenSettings);
                     }
                 });
             }
-            ConnectionStatus::Connecting => widgets::empty_state(ui, icons::CONNECTION, "Connecting…", ""),
-            _ => widgets::empty_state(ui, icons::SEARCH, "No summons found", "Try a different search."),
+            ConnectionStatus::Connecting => widgets::empty_state(ui, icons::CONNECTION, tr("Connecting…"), ""),
+            _ => widgets::empty_state(ui, icons::SEARCH, tr("No summons found"), tr("Try a different search.")),
         }
         return;
     }
@@ -171,16 +178,15 @@ fn row(ui: &mut Ui, summon: &SummonListItem, selected: bool, textures: &mut Text
 
     response.on_hover_ui(|ui| {
         ui.label(RichText::new(&summon.summon_name).font(theme::bold(theme::BODY_SIZE)));
-        ui.label(widgets::caption(format!(
+        let evolves_into = if summon.evolve_target == 0 { "—".to_owned() } else { summon.evolve_target.to_string() };
+        ui.label(widgets::caption(trf(
             "ID {}  ·  Form {}  ·  Evolves into {}",
-            summon.summon_id,
-            summon.form,
-            if summon.evolve_target == 0 { "—".to_owned() } else { summon.evolve_target.to_string() }
+            &[&summon.summon_id, &summon.form, &evolves_into],
         )));
         ui.label(widgets::caption(format!(
             "{}  {} ({})",
             icons::CARD,
-            summon.card_name.as_deref().unwrap_or("Unknown card"),
+            summon.card_name.as_deref().unwrap_or(tr("Unknown card")),
             summon.card_id
         )));
     })

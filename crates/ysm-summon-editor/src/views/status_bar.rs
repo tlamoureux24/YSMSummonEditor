@@ -9,6 +9,7 @@ use crate::icons;
 use crate::state::ConnectionStatus;
 use crate::theme::{self, color, space};
 use crate::widgets;
+use ysm_core::i18n::{tr, trf};
 
 const BAR_HEIGHT: f32 = 24.0;
 
@@ -45,32 +46,32 @@ fn connection(ui: &mut Ui, view: &mut ViewContext<'_>) {
         }
         ConnectionStatus::Demo => (
             icons::DATABASE,
-            "Demo data".to_owned(),
+            tr("Demo data").to_owned(),
             color::warning(),
-            "Built-in sample data; start without --demo to use a database.".to_owned(),
+            tr("Built-in sample data; start without --demo to use a database.").to_owned(),
         ),
         ConnectionStatus::Connecting => {
-            (icons::CONNECTION, "Connecting…".to_owned(), color::text_muted(), String::new())
+            (icons::CONNECTION, tr("Connecting…").to_owned(), color::text_muted(), String::new())
         }
         ConnectionStatus::Failed(error) => {
-            (icons::NO_CONNECTION, "Connection failed".to_owned(), color::danger(), error.clone())
+            (icons::NO_CONNECTION, tr("Connection failed").to_owned(), color::danger(), error.clone())
         }
         ConnectionStatus::Lost(error) => (
             icons::NO_CONNECTION,
-            "Connection lost".to_owned(),
+            tr("Connection lost").to_owned(),
             color::danger(),
-            format!("{error}\n\nThe next request reconnects automatically."),
+            trf("{}\n\nThe next request reconnects automatically.", &[&error]),
         ),
         ConnectionStatus::NotConfigured => (
             icons::NO_CONNECTION,
-            "Database not configured".to_owned(),
+            tr("Database not configured").to_owned(),
             color::warning(),
-            "Open Settings to set up the connection.".to_owned(),
+            tr("Open Settings to set up the connection.").to_owned(),
         ),
     };
 
     if state.connection.can_reconnect() {
-        let reconnect = egui::Button::new(item(icons::REFRESH, "Reconnect", color::text())).small();
+        let reconnect = egui::Button::new(item(icons::REFRESH, tr("Reconnect"), color::text())).small();
         if ui.add(reconnect).clicked() {
             view.actions.push(Action::Reconnect);
         }
@@ -89,12 +90,12 @@ fn assets(ui: &mut Ui, view: &ViewContext<'_>) {
     match state.asset_count {
         Some(count) => {
             let tint = if count == 0 { color::warning() } else { color::text_muted() };
-            ui.label(item(icons::IMAGES, &format!("{count} images"), tint))
-                .on_hover_text(format!("Dump folder: {}", state.settings.dump_folder_path));
+            ui.label(item(icons::IMAGES, &trf("{} images", &[&count]), tint))
+                .on_hover_text(trf("Dump folder: {}", &[&state.settings.dump_folder_path]));
         }
         None => {
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
-            ui.label(item(icons::IMAGES, "Indexing images…", color::text_muted()));
+            ui.label(item(icons::IMAGES, tr("Indexing images…"), color::text_muted()));
         }
     }
 }

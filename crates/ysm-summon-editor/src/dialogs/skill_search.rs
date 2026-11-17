@@ -11,6 +11,7 @@ use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, game_tooltip};
 use crate::worker::{Command, Event};
+use ysm_core::i18n::{tr, trf};
 
 const DEBOUNCE: Duration = Duration::from_millis(250);
 
@@ -83,13 +84,13 @@ impl SkillSearch {
     /// The state of the search as a caption: a spinner, an error or the result count.
     pub fn status(&self, ui: &mut Ui) {
         if let Some(error) = &self.error {
-            ui.label(widgets::caption(format!("{}  Search failed", icons::ERROR)).color(color::danger()))
+            ui.label(widgets::caption(trf("{}  Search failed", &[&icons::ERROR])).color(color::danger()))
                 .on_hover_text(error.as_str());
         } else if self.awaiting.is_some() {
-            ui.label(widgets::caption("Searching…"));
+            ui.label(widgets::caption(tr("Searching…")));
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
         } else {
-            ui.label(widgets::caption(format!("{} skills", self.results.len())));
+            ui.label(widgets::caption(trf("{} skills", &[&self.results.len()])));
         }
     }
 
@@ -106,7 +107,7 @@ impl SkillSearch {
 
         let search = ui.add(
             widgets::text_field(&mut self.query)
-                .hint_text(format!("{}  Skill ID or name", icons::SEARCH))
+                .hint_text(trf("{}  Skill ID or name", &[&icons::SEARCH]))
                 .desired_width(f32::INFINITY),
         );
         if !self.started {
@@ -221,7 +222,7 @@ pub fn skill_row(
         if disabled { color::text_disabled() } else { color::text() },
     );
     let detail =
-        if disabled { format!("{}  ·  already in the group", skill.skill_id) } else { skill.skill_id.to_string() };
+        if disabled { trf("{}  ·  already in the group", &[&skill.skill_id]) } else { skill.skill_id.to_string() };
     painter.text(
         egui::pos2(text_left, rect.center().y + 9.0),
         Align2::LEFT_CENTER,

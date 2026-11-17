@@ -11,6 +11,7 @@ mod tree;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use crate::commit::{CommitRequest, SkillUpdate, TreeCommit};
+use crate::i18n::trf;
 use crate::model::{
     EntryField, EvolutionChain, STAGE_COUNT, SkillDisplay, SkillTreeEntry, StatScalingSnapshot, TREE_SLOTS,
 };
@@ -178,7 +179,7 @@ impl EditSession {
     }
 
     pub fn skill_name(&self, skill_id: i32) -> String {
-        self.skill_display.get(&skill_id).map_or_else(|| format!("Skill {skill_id}"), |d| d.skill_name.clone())
+        self.skill_display.get(&skill_id).map_or_else(|| trf("Skill {}", &[&skill_id]), |d| d.skill_name.clone())
     }
 
     /// Skill IDs that need a display lookup and have not been asked for yet.

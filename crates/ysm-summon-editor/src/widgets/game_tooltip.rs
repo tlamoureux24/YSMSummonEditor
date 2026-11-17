@@ -8,6 +8,7 @@ use ysm_core::session::{EditSession, GroupState};
 use ysm_core::tooltip;
 
 use crate::theme::{self, color};
+use ysm_core::i18n::{tr, trf};
 
 const TOOLTIP_WIDTH: f32 = 460.0;
 const BODY_SIZE: f32 = 13.0;
@@ -40,7 +41,7 @@ pub fn layout(markup: &str, wrap_width: f32) -> LayoutJob {
 /// Tooltip contents for a skill: name, ID and the game tooltip when there is one.
 pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
     ui.set_max_width(TOOLTIP_WIDTH);
-    let name = display.map_or_else(|| format!("Skill {skill_id}"), |d| d.skill_name.clone());
+    let name = display.map_or_else(|| trf("Skill {}", &[&skill_id]), |d| d.skill_name.clone());
     ui.horizontal(|ui| {
         ui.label(RichText::new(name).font(theme::bold(theme::BODY_SIZE)));
         ui.label(RichText::new(format!("#{skill_id}")).color(color::text_muted()));
@@ -52,7 +53,7 @@ pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
             ui.label(layout(markup, TOOLTIP_WIDTH));
         }
         None if display.is_none() => {
-            ui.label(RichText::new("This skill does not exist in SkillResource.").color(color::warning()));
+            ui.label(RichText::new(tr("This skill does not exist in SkillResource.")).color(color::warning()));
         }
         None => {}
     }
@@ -61,13 +62,13 @@ pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
 /// Tooltip contents for a random group badge: state and candidate skills.
 pub fn random_group(ui: &mut Ui, session: &EditSession, group_id: i32) {
     ui.set_max_width(TOOLTIP_WIDTH);
-    ui.label(RichText::new(format!("Random group {group_id}")).font(theme::bold(theme::BODY_SIZE)));
+    ui.label(RichText::new(trf("Random group {}", &[&group_id])).font(theme::bold(theme::BODY_SIZE)));
 
     let (state_text, tint) = match session.group_state(group_id) {
-        GroupState::Pending => ("Staged — will be written on save", color::dirty_mark()),
-        GroupState::Loaded => ("Loaded from the database", color::text_muted()),
-        GroupState::MissingInDb => ("Missing in SummonRandomSkillResource", color::warning()),
-        GroupState::Loading => ("Loading…", color::text_muted()),
+        GroupState::Pending => (tr("Staged — will be written on save"), color::dirty_mark()),
+        GroupState::Loaded => (tr("Loaded from the database"), color::text_muted()),
+        GroupState::MissingInDb => (tr("Missing in SummonRandomSkillResource"), color::warning()),
+        GroupState::Loading => (tr("Loading…"), color::text_muted()),
     };
     ui.label(RichText::new(state_text).color(tint));
 
@@ -78,9 +79,9 @@ pub fn random_group(ui: &mut Ui, session: &EditSession, group_id: i32) {
 
 fn candidates(ui: &mut Ui, session: &EditSession, group: &RandomSkillGroup) {
     ui.separator();
-    ui.label(RichText::new(format!("UseCode: {}", group.use_code())).color(color::text_muted()));
+    ui.label(RichText::new(trf("UseCode: {}", &[&group.use_code()])).color(color::text_muted()));
     if group.skill_ids().is_empty() {
-        ui.label(RichText::new("No candidate skills.").color(color::text_muted()));
+        ui.label(RichText::new(tr("No candidate skills.")).color(color::text_muted()));
         return;
     }
     egui::Grid::new(("group-candidates", group.group_id)).num_columns(2).spacing([10.0, 2.0]).show(ui, |ui| {

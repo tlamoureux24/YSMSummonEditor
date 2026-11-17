@@ -21,6 +21,7 @@ use crate::dialogs::{Dialog, MessageDialog};
 use crate::icons;
 use crate::widgets::toast::ToastKind;
 use crate::worker::{Command, FailureKind, Outcome};
+use ysm_core::i18n::{tr, trf};
 
 /// What triggered the save, which decides what happens once it is done.
 pub(super) enum SaveOrigin {
@@ -51,23 +52,23 @@ impl EditorApp {
         let request = self.state.session.build_commit_request();
         if request.is_empty() {
             match origin {
-                SaveOrigin::Toolbar => self.toasts.push(ToastKind::Info, "No changes to save."),
+                SaveOrigin::Toolbar => self.toasts.push(ToastKind::Info, tr("No changes to save.")),
                 SaveOrigin::SummonSwitch(summon) => self.load_chain(summon),
             }
             return;
         }
         if !self.state.connection.is_ready() {
             self.push_dialog(Dialog::message(MessageDialog::error(
-                "Save",
-                "The database is not connected, so shared data cannot be checked.",
-                "Open Settings and fix the connection, then save again.",
+                tr("Save"),
+                tr("The database is not connected, so shared data cannot be checked."),
+                tr("Open Settings and fix the connection, then save again."),
             )));
             return;
         }
 
         let session_tree_ids = self.state.session.editable_tree_commits().iter().map(|t| t.original_tree_id).collect();
         self.worker.send(Command::AnalyzeSave { request, session_tree_ids });
-        self.busy = Some("Checking where the edited data is used…");
+        self.busy = Some(tr("Checking where the edited data is used…"));
         self.save = SaveFlow::Analyzing(origin);
     }
 
@@ -89,7 +90,7 @@ impl EditorApp {
                 );
                 self.ask_or_review(origin, planner);
             }
-            Err(error) => self.save_failed("Could not check where the edited data is used.", error.message),
+            Err(error) => self.save_failed(tr("Could not check where the edited data is used."), error.message),
         }
     }
 
@@ -108,7 +109,7 @@ impl EditorApp {
         let sql = render_script(&request, &Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
         let settings = &self.state.settings;
         let target =
-            if self.state.demo { "demo data (in memory)".to_owned() } else { settings.database.display_target() };
+            if self.state.demo { tr("demo data (in memory)").to_owned() } else { settings.database.display_target() };
         let dialog = SaveReviewDialog::new(rows, sql, settings.save_to_sql_mode, target);
         self.push_dialog(Dialog::SaveReview(Box::new(dialog)));
         self.save = SaveFlow::Reviewing { origin, request };
@@ -126,7 +127,7 @@ impl EditorApp {
 
     pub(super) fn on_save_cancelled(&mut self) {
         self.save = SaveFlow::Idle;
-        self.set_status("Save cancelled. Staged changes are kept.");
+        self.set_status(tr("Save cancelled. Staged changes are kept."));
     }
 
     pub(super) fn on_review_confirmed(&mut self) {
@@ -141,26 +142,29 @@ impl EditorApp {
 
         let database = &self.state.settings.database;
         let target = if self.state.demo {
-            "Target: demo data (in memory)".to_owned()
+            tr("Target: demo data (in memory)").to_owned()
         } else {
-            format!("Server: {},{}\nDatabase: {}", database.server, database.effective_port(), database.database)
+            trf("Server: {},{}\nDatabase: {}", &[&database.server, &database.effective_port(), &database.database])
         };
-        let details = format!(
-            "{target}\n\nSkillTree changes: {}\nSkill field updates: {}\nStatResource updates: {}\nGrowth bonus updates: {}\nRandom group updates: {}",
-            request.trees.len(),
-            request.skills.len(),
-            request.stats.len(),
-            request.level_bonuses.len(),
-            request.random_groups.len()
+        let details = trf(
+            "{}\n\nSkillTree changes: {}\nSkill field updates: {}\nStatResource updates: {}\nGrowth bonus updates: {}\nRandom group updates: {}",
+            &[
+                &target,
+                &request.trees.len(),
+                &request.skills.len(),
+                &request.stats.len(),
+                &request.level_bonuses.len(),
+                &request.random_groups.len(),
+            ],
         );
         let dialog = MessageDialog::new(
             MessageKind::Question,
-            "Confirm database save",
-            "Apply the staged changes to the database now?",
+            tr("Confirm database save"),
+            tr("Apply the staged changes to the database now?"),
         )
         .details(details)
-        .button(icons::DATABASE, "Save to database", ButtonStyle::Primary, Some(Action::CommitConfirmed))
-        .button(icons::CLOSE, "Cancel", ButtonStyle::Plain, Some(Action::SaveCancelled))
+        .button(icons::DATABASE, tr("Save to database"), ButtonStyle::Primary, Some(Action::CommitConfirmed))
+        .button(icons::CLOSE, tr("Cancel"), ButtonStyle::Plain, Some(Action::SaveCancelled))
         .on_dismiss(Action::SaveCancelled);
         self.push_dialog(Dialog::message(dialog));
         self.save = SaveFlow::Confirming { origin, request };
@@ -169,10 +173,10 @@ impl EditorApp {
     fn export_sql(&mut self, origin: SaveOrigin, request: &CommitRequest) {
         let now = Local::now();
         let Some(path) = rfd::FileDialog::new()
-            .set_title("Export SQL script")
+            .set_title(tr("Export SQL script"))
             .set_file_name(format!("summon-editor-diff-{}.sql", now.format("%Y%m%d-%H%M%S")))
-            .add_filter("SQL files", &["sql"])
-            .add_filter("All files", &["*"])
+            .add_filter(tr("SQL files"), &["sql"])
+            .add_filter(tr("All files"), &["*"])
             .save_file()
         else {
             self.on_save_cancelled();
@@ -182,20 +186,20 @@ impl EditorApp {
         let dialect = self.state.settings.database.provider.sql_dialect();
         let sql = render_script(request, &now.format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
         if let Err(error) = std::fs::write(&path, sql) {
-            self.save_failed("The SQL file could not be written.", error.to_string());
+            self.save_failed(tr("The SQL file could not be written."), error.to_string());
             return;
         }
 
-        self.toasts.push(ToastKind::Success, "SQL file generated. No database write was performed.");
+        self.toasts.push(ToastKind::Success, tr("SQL file generated. No database write was performed."));
         match origin {
             SaveOrigin::Toolbar => {
-                self.set_status(format!("SQL diff saved: {}. Pending changes remain staged.", path.display()));
+                self.set_status(trf("SQL diff saved: {}. Pending changes remain staged.", &[&path.display()]));
             }
             SaveOrigin::SummonSwitch(summon) => {
                 self.load_chain(summon);
-                self.set_status(format!(
+                self.set_status(trf(
                     "SQL diff saved: {}. Staged changes cleared for summon switch.",
-                    path.display()
+                    &[&path.display()],
                 ));
             }
         }
@@ -206,7 +210,7 @@ impl EditorApp {
             return;
         };
         self.worker.send(Command::Commit { request });
-        self.busy = Some("Saving changes to the database…");
+        self.busy = Some(tr("Saving changes to the database…"));
         self.save = SaveFlow::Committing(origin);
     }
 
@@ -217,11 +221,11 @@ impl EditorApp {
         };
         match result {
             Ok(result) => {
-                let summary = format!(
+                let summary = trf(
                     "Saved trees: {}, skills: {}, random groups: {}.",
-                    result.updated_trees, result.updated_skills, result.updated_random_groups
+                    &[&result.updated_trees, &result.updated_skills, &result.updated_random_groups],
                 );
-                self.toasts.push(ToastKind::Success, format!("Changes saved successfully. {summary}"));
+                self.toasts.push(ToastKind::Success, trf("Changes saved successfully. {}", &[&summary]));
 
                 // Reload from the database so the editor shows exactly what was written.
                 let next = match origin {
@@ -240,8 +244,8 @@ impl EditorApp {
 
     fn save_failed(&mut self, text: &str, details: String) {
         self.save = SaveFlow::Idle;
-        self.set_status("Save failed (see details).");
-        self.push_dialog(Dialog::message(MessageDialog::error("Save failed", text, details)));
+        self.set_status(tr("Save failed (see details)."));
+        self.push_dialog(Dialog::message(MessageDialog::error(tr("Save failed"), text, details)));
     }
 }
 
@@ -250,7 +254,7 @@ impl EditorApp {
 fn commit_failure_text(kind: FailureKind) -> &'static str {
     match kind {
         FailureKind::Request | FailureKind::NotConnected => {
-            "Could not save the staged changes. The transaction was rolled back and nothing was written."
+            tr("Could not save the staged changes. The transaction was rolled back and nothing was written.")
         }
         FailureKind::Connection | FailureKind::Timeout | FailureKind::Internal => {
             "The save was interrupted before the database confirmed it. The transaction is normally rolled back, \
@@ -264,52 +268,54 @@ fn commit_failure_text(kind: FailureKind) -> &'static str {
 fn question_dialog(question: &SaveQuestion) -> MessageDialog {
     let (title, text, items): (&str, String, Vec<String>) = match question {
         SaveQuestion::SkillImpact { rows } => (
-            "Global skill impact",
-            "The edited skills are also used by other summons. The change applies to all of them.".to_owned(),
+            tr("Global skill impact"),
+            tr("The edited skills are also used by other summons. The change applies to all of them.").to_owned(),
             rows.iter()
                 .map(|r| {
-                    format!("Skill {} → {} ({}), tree {}", r.skill_id, r.summon_name, r.summon_id, r.skill_tree_id)
+                    trf("Skill {} → {} ({}), tree {}", &[&r.skill_id, &r.summon_name, &r.summon_id, &r.skill_tree_id])
                 })
                 .collect(),
         ),
         SaveQuestion::SharedRandomGroup { group_id, rows } => (
-            "Shared random group",
-            format!(
-                "Random group {group_id} is used by other summons. Clone it and point this chain at the copy, or edit it in place for everyone?"
+            tr("Shared random group"),
+            trf(
+                "Random group {} is used by other summons. Clone it and point this chain at the copy, or edit it in place for everyone?",
+                &[&group_id],
             ),
             rows.iter()
                 .map(|r| {
-                    format!(
+                    trf(
                         "{} ({}) · tree slot {} (SkillTree {})",
-                        r.summon_name, r.summon_id, r.tree_slot, r.skill_tree_id
+                        &[&r.summon_name, &r.summon_id, &r.tree_slot, &r.skill_tree_id],
                     )
                 })
                 .collect(),
         ),
         SaveQuestion::SharedTree { key, rows } => (
-            "Shared skill tree",
-            format!(
+            tr("Shared skill tree"),
+            trf(
                 "Tree {} (summon {}, slot {}) is shared with other summons. Clone it for this summon slot, or edit it in place for everyone?",
-                key.tree_id, key.summon_id, key.slot
+                &[&key.tree_id, &key.summon_id, &key.slot],
             ),
-            rows.iter().map(|r| format!("{} ({}) · slot {}", r.summon_name, r.summon_id, r.tree_slot)).collect(),
+            rows.iter().map(|r| trf("{} ({}) · slot {}", &[&r.summon_name, &r.summon_id, &r.tree_slot])).collect(),
         ),
         SaveQuestion::SharedStat { summon_id, stat_id, rows } => (
-            "Shared stat row",
-            format!(
-                "StatResource {stat_id} is shared with other summons. Clone it for summon {summon_id}, or edit it in place for everyone?"
+            tr("Shared stat row"),
+            trf(
+                "StatResource {} is shared with other summons. Clone it for summon {}, or edit it in place for everyone?",
+                &[&stat_id, &summon_id],
             ),
             rows.iter().map(|r| format!("{} ({})", r.summon_name, r.summon_id)).collect(),
         ),
         SaveQuestion::LevelBonusImpact { rows } => (
-            "Shared growth bonus",
-            "The edited growth bonus rows are also used by other summons. The change applies to all of them."
+            tr("Shared growth bonus"),
+            tr("The edited growth bonus rows are also used by other summons. The change applies to all of them.")
                 .to_owned(),
             rows.iter()
                 .map(|r| {
-                    format!(
+                    trf(
                         "Bonus {} → {} ({}), growth stage {}",
-                        r.bonus_id, r.summon_name, r.summon_id, r.stage_index
+                        &[&r.bonus_id, &r.summon_name, &r.summon_id, &r.stage_index],
                     )
                 })
                 .collect(),
@@ -319,13 +325,23 @@ fn question_dialog(question: &SaveQuestion) -> MessageDialog {
     let dialog = MessageDialog::new(MessageKind::Warning, title, text).items(items);
     let dialog = if question.is_choice() {
         dialog
-            .button(icons::DUPLICATE, "Clone", ButtonStyle::Primary, Some(Action::SaveAnswer(SaveAnswer::Clone)))
-            .button(icons::EDIT, "Edit in place", ButtonStyle::Danger, Some(Action::SaveAnswer(SaveAnswer::InPlace)))
+            .button(icons::DUPLICATE, tr("Clone"), ButtonStyle::Primary, Some(Action::SaveAnswer(SaveAnswer::Clone)))
+            .button(
+                icons::EDIT,
+                tr("Edit in place"),
+                ButtonStyle::Danger,
+                Some(Action::SaveAnswer(SaveAnswer::InPlace)),
+            )
     } else {
-        dialog.button(icons::CHECK, "Continue", ButtonStyle::Primary, Some(Action::SaveAnswer(SaveAnswer::Continue)))
+        dialog.button(
+            icons::CHECK,
+            tr("Continue"),
+            ButtonStyle::Primary,
+            Some(Action::SaveAnswer(SaveAnswer::Continue)),
+        )
     };
     dialog
-        .button(icons::CLOSE, "Cancel save", ButtonStyle::Plain, Some(Action::SaveCancelled))
+        .button(icons::CLOSE, tr("Cancel save"), ButtonStyle::Plain, Some(Action::SaveCancelled))
         .on_dismiss(Action::SaveCancelled)
 }
 

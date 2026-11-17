@@ -27,6 +27,8 @@ use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::value::SkillRecord;
 
 pub use crate::mssql::Timeouts;
+use ysm_core::i18n::{Language, trf};
+
 use crate::settings::DbSettings;
 use crate::{DataError, Result, SummonRepository};
 
@@ -41,6 +43,10 @@ pub struct PgRepository {
     timeouts: Timeouts,
     client: Option<Client>,
     last_used: Instant,
+    /// Language of the game texts (names, tooltips).
+    language: Language,
+    /// The table holding them, chosen once per connection.
+    texts: Option<String>,
 }
 
 impl PgRepository {
@@ -54,12 +60,20 @@ impl PgRepository {
             return Err(DataError::NotConfigured);
         }
         let runtime = tokio::runtime::Builder::new_current_thread().enable_io().enable_time().build()?;
-        Ok(Self { runtime, settings, timeouts, client: None, last_used: Instant::now() })
+        Ok(Self {
+            runtime,
+            settings,
+            timeouts,
+            client: None,
+            last_used: Instant::now(),
+            language: Language::default(),
+            texts: None,
+        })
     }
 
     /// Runs one database operation, opening the connection first when needed.
-    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut Client) -> PgResult<T>) -> Result<T> {
-        let Self { runtime, settings, timeouts, client, last_used } = self;
+    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut Client, &str) -> PgResult<T>) -> Result<T> {
+        let Self { runtime, settings, timeouts, client, last_used, language, texts } = self;
         runtime.block_on(async {
             if let Some(existing) = client.as_ref()
                 && last_used.elapsed() > IDLE_CHECK_AFTER
@@ -70,18 +84,28 @@ impl PgRepository {
 
             let connection = match client {
                 Some(connection) => connection,
-                None => client.insert(connect(settings, *timeouts).await?),
+                None => {
+                    *texts = None;
+                    client.insert(connect(settings, *timeouts).await?)
+                }
             };
             // The server cancels a long statement itself; this also covers a server that stops answering.
-            let outcome = tokio::time::timeout(timeouts.command, operation(connection)).await;
+            let outcome = tokio::time::timeout(timeouts.command, async {
+                let table = match texts.as_ref() {
+                    Some(table) => table.clone(),
+                    None => texts.insert(text_table(connection, *language).await?).clone(),
+                };
+                operation(connection, &table).await
+            })
+            .await;
             *last_used = Instant::now();
 
             let failure = match outcome {
                 Ok(Ok(value)) => return Ok(value),
                 Ok(Err(error)) => classify(&error, timeouts.command),
-                Err(_) => DataError::Timeout(format!(
+                Err(_) => DataError::Timeout(trf(
                     "no response within {} s; the connection was closed",
-                    timeouts.command.as_secs()
+                    &[&timeouts.command.as_secs()],
                 )),
             };
             // Errors reported by the server leave the connection usable. After anything
@@ -94,6 +118,13 @@ impl PgRepository {
     }
 }
 
+/// `StringResource`, or `StringResource_EN` for English when the database has it.
+async fn text_table(client: &Client, language: Language) -> PgResult<String> {
+    let english = language == Language::English
+        && client.query_one("SELECT to_regclass('stringresource_en') IS NOT NULL", &[]).await?.get::<_, bool>(0);
+    Ok(if english { "StringResource_EN" } else { "StringResource" }.to_owned())
+}
+
 async fn is_alive(client: &Client, timeout: Duration) -> bool {
     matches!(tokio::time::timeout(timeout, client.simple_query("SELECT 1")).await, Ok(Ok(_)))
 }
@@ -101,9 +132,9 @@ async fn is_alive(client: &Client, timeout: Duration) -> bool {
 /// Sorts a driver error into "the server said no" versus "the connection is gone".
 fn classify(error: &tokio_postgres::Error, command_timeout: Duration) -> DataError {
     match error.as_db_error() {
-        Some(db) if db.code() == &SqlState::QUERY_CANCELED => DataError::Timeout(format!(
+        Some(db) if db.code() == &SqlState::QUERY_CANCELED => DataError::Timeout(trf(
             "no response within {} s; the statement was cancelled",
-            command_timeout.as_secs()
+            &[&command_timeout.as_secs()],
         )),
         Some(db) => DataError::Query(format!("{} (SQLSTATE {})", db.message(), db.code().code())),
         None => DataError::Connection(error.to_string()),
@@ -140,7 +171,7 @@ async fn connect(settings: &DbSettings, timeouts: Timeouts) -> Result<Client> {
     // ponytail: no TLS, the usual setup is a local server; add postgres-native-tls if a remote one needs it.
     let (client, connection) = tokio::time::timeout(timeouts.connect, config.connect(NoTls))
         .await
-        .map_err(|_| DataError::Connection(format!("timed out logging in to {target}")))?
+        .map_err(|_| DataError::Connection(trf("timed out logging in to {}", &[&target])))?
         .map_err(|error| match error.as_db_error() {
             Some(db) => DataError::Connection(format!("{target}: {} (SQLSTATE {})", db.message(), db.code().code())),
             None => DataError::Connection(format!("{target}: {error}")),
@@ -161,37 +192,44 @@ fn validate(request: &CommitRequest) -> Result<()> {
 }
 
 impl SummonRepository for PgRepository {
+    fn set_text_language(&mut self, language: Language) {
+        if language != self.language {
+            self.language = language;
+            self.texts = None;
+        }
+    }
+
     fn test_connection(&mut self) -> Result<String> {
-        self.run(async |c| queries::server_version(c).await)
+        self.run(async |c, _| queries::server_version(c).await)
     }
 
     fn summon_by_id(&mut self, summon_id: i32) -> Result<Option<SummonListItem>> {
-        self.run(async |c| queries::summon_by_id(c, summon_id).await)
+        self.run(async |c, t| queries::summon_by_id(c, t, summon_id).await)
     }
 
     fn summons_by_card_id(&mut self, card_id: i32) -> Result<Vec<SummonListItem>> {
-        self.run(async |c| queries::summons_by_card_id(c, card_id).await)
+        self.run(async |c, t| queries::summons_by_card_id(c, t, card_id).await)
     }
 
     fn search_summons(&mut self, filter: &SummonListFilter) -> Result<Vec<SummonListItem>> {
-        self.run(async |c| queries::search_summons(c, filter).await)
+        self.run(async |c, t| queries::search_summons(c, t, filter).await)
     }
 
     fn skill_tree_entries(&mut self, skill_tree_id: i32) -> Result<Vec<SkillTreeEntry>> {
-        self.run(async |c| queries::skill_tree_entries(c, skill_tree_id).await)
+        self.run(async |c, _| queries::skill_tree_entries(c, skill_tree_id).await)
     }
 
     fn stat_scaling(&mut self, summon_id: i32) -> Result<StatScalingSnapshot> {
-        self.run(async |c| queries::stat_scaling(c, summon_id).await)?
+        self.run(async |c, _| queries::stat_scaling(c, summon_id).await)?
             .ok_or_else(|| DataError::NotFound(format!("Summon {summon_id}")))
     }
 
     fn creature_enhance(&mut self) -> Result<Vec<CreatureEnhance>> {
-        self.run(async |c| queries::creature_enhance(c).await)
+        self.run(async |c, _| queries::creature_enhance(c).await)
     }
 
     fn skill_record(&mut self, skill_id: i32) -> Result<SkillRecord> {
-        self.run(async |c| queries::skill_record(c, skill_id).await)?
+        self.run(async |c, _| queries::skill_record(c, skill_id).await)?
             .ok_or_else(|| DataError::NotFound(format!("Skill {skill_id}")))
     }
 
@@ -199,62 +237,62 @@ impl SummonRepository for PgRepository {
         if skill_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.run(async |c| queries::skill_display(c, skill_ids).await)
+        self.run(async |c, t| queries::skill_display(c, t, skill_ids).await)
     }
 
     fn search_skills(&mut self, text: &str, limit: usize) -> Result<Vec<SkillDisplay>> {
-        self.run(async |c| queries::search_skills(c, text, limit).await)
+        self.run(async |c, t| queries::search_skills(c, t, text, limit).await)
     }
 
     fn random_groups(&mut self, group_ids: &[i32]) -> Result<HashMap<i32, RandomSkillGroup>> {
         if group_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.run(async |c| queries::random_groups(c, group_ids).await)
+        self.run(async |c, _| queries::random_groups(c, group_ids).await)
     }
 
     fn next_random_group_id(&mut self) -> Result<i32> {
-        self.run(async |c| queries::next_random_group_id(c).await)
+        self.run(async |c, _| queries::next_random_group_id(c).await)
     }
 
     fn skill_usage(&mut self, skill_ids: &[i32]) -> Result<Vec<SkillUsage>> {
         if skill_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c| queries::skill_usage(c, skill_ids).await)
+        self.run(async |c, t| queries::skill_usage(c, t, skill_ids).await)
     }
 
     fn tree_usage(&mut self, skill_tree_ids: &[i32]) -> Result<Vec<TreeUsage>> {
         if skill_tree_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c| queries::tree_usage(c, skill_tree_ids).await)
+        self.run(async |c, t| queries::tree_usage(c, t, skill_tree_ids).await)
     }
 
     fn stat_usage(&mut self, stat_ids: &[i32]) -> Result<Vec<StatUsage>> {
         if stat_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c| queries::stat_usage(c, stat_ids).await)
+        self.run(async |c, t| queries::stat_usage(c, t, stat_ids).await)
     }
 
     fn level_bonus_usage(&mut self, bonus_ids: &[i32]) -> Result<Vec<LevelBonusUsage>> {
         if bonus_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c| queries::level_bonus_usage(c, bonus_ids).await)
+        self.run(async |c, t| queries::level_bonus_usage(c, t, bonus_ids).await)
     }
 
     fn random_group_usage(&mut self, group_ids: &[i32]) -> Result<Vec<RandomGroupUsage>> {
         if group_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c| queries::random_group_usage(c, group_ids).await)
+        self.run(async |c, t| queries::random_group_usage(c, t, group_ids).await)
     }
 
     fn commit(&mut self, request: &CommitRequest) -> Result<CommitResult> {
         validate(request)?;
-        self.run(async |c| commit::commit(c, request).await)
+        self.run(async |c, _| commit::commit(c, request).await)
     }
 }
 

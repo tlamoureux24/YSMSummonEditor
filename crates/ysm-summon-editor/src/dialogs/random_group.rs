@@ -18,6 +18,7 @@ use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, modal};
 use crate::worker::Event;
+use ysm_core::i18n::{tr, trf};
 
 const LIST_HEIGHT: f32 = 384.0;
 /// Width of the column holding the Add / Remove / Clear buttons.
@@ -65,7 +66,7 @@ impl RandomGroupDialog {
     fn display(&self, session: &EditSession, skill_id: i32) -> SkillDisplay {
         self.known.get(&skill_id).or_else(|| session.skill_display(skill_id)).cloned().unwrap_or_else(|| SkillDisplay {
             skill_id,
-            skill_name: format!("Skill {skill_id}"),
+            skill_name: trf("Skill {}", &[&skill_id]),
             icon_file_name: None,
             tooltip_markup: None,
         })
@@ -77,14 +78,14 @@ impl RandomGroupDialog {
 
     fn add(&mut self, skill: &SkillDisplay) {
         if self.members.contains(&skill.skill_id) {
-            self.status = format!("Skill {} is already in the group.", skill.skill_id);
+            self.status = trf("Skill {} is already in the group.", &[&skill.skill_id]);
         } else if self.members.len() >= MAX_GROUP_SKILLS {
-            self.status = format!("A random group can hold at most {MAX_GROUP_SKILLS} skills.");
+            self.status = trf("A random group can hold at most {} skills.", &[&MAX_GROUP_SKILLS]);
         } else {
             self.known.insert(skill.skill_id, skill.clone());
             self.members.push(skill.skill_id);
             self.members.sort_unstable();
-            self.status = format!("Added skill {}.", skill.skill_id);
+            self.status = trf("Added skill {}.", &[&skill.skill_id]);
         }
     }
 
@@ -93,14 +94,14 @@ impl RandomGroupDialog {
         if self.selected_member == Some(skill_id) {
             self.selected_member = None;
         }
-        self.status = format!("Removed skill {skill_id}.");
+        self.status = trf("Removed skill {}.", &[&skill_id]);
     }
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
         let title = if self.is_new {
-            format!("New Random Group · RND[{}]", self.group_id)
+            trf("New Random Group · RND[{}]", &[&self.group_id])
         } else {
-            format!("Random Group · RND[{}]", self.group_id)
+            trf("Random Group · RND[{}]", &[&self.group_id])
         };
         let mut apply = false;
         let mut cancelled = false;
@@ -135,10 +136,10 @@ impl RandomGroupDialog {
             });
 
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
-                if widgets::primary_button_enabled(ui, self.is_dirty(), icons::CHECK, "Apply").clicked() {
+                if widgets::primary_button_enabled(ui, self.is_dirty(), icons::CHECK, tr("Apply")).clicked() {
                     apply = true;
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
@@ -165,7 +166,7 @@ impl RandomGroupDialog {
         widgets::control_row(
             ui,
             |ui| {
-                widgets::section_title(ui, "All skills");
+                widgets::section_title(ui, tr("All skills"));
             },
             |ui| self.search.status(ui),
         );
@@ -187,23 +188,23 @@ impl RandomGroupDialog {
         let can_add = candidate.as_ref().is_some_and(|skill| !self.members.contains(&skill.skill_id))
             && self.members.len() < MAX_GROUP_SKILLS;
 
-        let add = egui::Button::new(format!("Add  {}", icons::ARROW_RIGHT)).min_size(size);
+        let add = egui::Button::new(trf("Add  {}", &[&icons::ARROW_RIGHT])).min_size(size);
         if ui.add_enabled(can_add, add).clicked()
             && let Some(skill) = candidate
         {
             self.add(&skill);
         }
-        let remove = egui::Button::new(widgets::icon_text(icons::DELETE, "Remove")).min_size(size);
+        let remove = egui::Button::new(widgets::icon_text(icons::DELETE, tr("Remove"))).min_size(size);
         if ui.add_enabled(self.selected_member.is_some(), remove).clicked()
             && let Some(skill_id) = self.selected_member
         {
             self.remove(skill_id);
         }
-        let clear = egui::Button::new(widgets::icon_text(icons::CLOSE, "Clear")).min_size(size);
+        let clear = egui::Button::new(widgets::icon_text(icons::CLOSE, tr("Clear"))).min_size(size);
         if ui.add_enabled(!self.members.is_empty(), clear).clicked() {
             self.members.clear();
             self.selected_member = None;
-            self.status = "Selection cleared.".to_owned();
+            self.status = tr("Selection cleared.").to_owned();
         }
     }
 
@@ -215,7 +216,7 @@ impl RandomGroupDialog {
         widgets::control_row(
             ui,
             |ui| {
-                widgets::section_title(ui, "Group candidates");
+                widgets::section_title(ui, tr("Group candidates"));
             },
             |ui| {
                 let tint = if full { color::warning() } else { color::text_muted() };
@@ -225,10 +226,10 @@ impl RandomGroupDialog {
         widgets::control_row(
             ui,
             |ui| {
-                ui.label(widgets::caption("Double-click a candidate to remove it."));
+                ui.label(widgets::caption(tr("Double-click a candidate to remove it.")));
             },
             |ui| {
-                ui.label(widgets::caption(format!("UseCode {}", self.members.len())));
+                ui.label(widgets::caption(trf("UseCode {}", &[&self.members.len()])));
             },
         );
 
@@ -239,8 +240,8 @@ impl RandomGroupDialog {
                 widgets::empty_state(
                     ui,
                     icons::RANDOM_GROUP,
-                    "No candidates yet",
-                    "Double-click a skill on the left to add it.",
+                    tr("No candidates yet"),
+                    tr("Double-click a skill on the left to add it."),
                 );
             }
             for (index, skill_id) in self.members.iter().enumerate() {

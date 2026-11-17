@@ -10,6 +10,7 @@ use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::toast::ToastKind;
 use crate::widgets::{self, ColumnAlign, Segment, header_cell, modal};
+use ysm_core::i18n::{tr, trf};
 
 const CONTENT_HEIGHT: f32 = 440.0;
 
@@ -38,11 +39,19 @@ impl SaveReviewDialog {
         let mut confirmed = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::CHANGES, color::accent_bright(), "Review Changes", 980.0, |ui| {
-            let changes_label = format!("Changes · {}", self.rows.len());
+        let outcome = modal::show(ctx, id, icons::CHANGES, color::accent_bright(), tr("Review Changes"), 980.0, |ui| {
+            let changes_label = trf("Changes · {}", &[&self.rows.len()]);
             let segments = [
-                Segment { icon: icons::CHANGES, label: &changes_label, tooltip: "Every change, with before and after" },
-                Segment { icon: icons::CODE, label: "SQL script", tooltip: "The same changes as an executable script" },
+                Segment {
+                    icon: icons::CHANGES,
+                    label: &changes_label,
+                    tooltip: tr("Every change, with before and after"),
+                },
+                Segment {
+                    icon: icons::CODE,
+                    label: tr("SQL script"),
+                    tooltip: tr("The same changes as an executable script"),
+                },
             ];
             let tab = &mut self.tab;
             let sql = &self.sql;
@@ -56,9 +65,9 @@ impl SaveReviewDialog {
                 },
                 |ui| {
                     // Always present, so switching tabs does not shift the row.
-                    if widgets::button(ui, icons::CLIPBOARD, "Copy SQL").clicked() {
+                    if widgets::button(ui, icons::CLIPBOARD, tr("Copy SQL")).clicked() {
                         actions.push(Action::CopyText(sql.clone()));
-                        actions.push(Action::Toast(ToastKind::Info, "SQL script copied to the clipboard.".into()));
+                        actions.push(Action::Toast(ToastKind::Info, tr("SQL script copied to the clipboard.").into()));
                     }
                 },
             );
@@ -69,22 +78,24 @@ impl SaveReviewDialog {
             }
 
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
                 let (icon, label) = if self.to_sql_file {
-                    (icons::SQL_FILE, "Export .sql…")
+                    (icons::SQL_FILE, tr("Export .sql…"))
                 } else {
-                    (icons::DATABASE, "Save to database")
+                    (icons::DATABASE, tr("Save to database"))
                 };
                 if widgets::primary_button(ui, icon, label).clicked() {
                     confirmed = true;
                 }
                 ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                     if self.to_sql_file {
-                        ui.label(widgets::caption("Save to .sql: a script is written; the database is not touched."));
+                        ui.label(widgets::caption(tr(
+                            "Save to .sql: a script is written; the database is not touched.",
+                        )));
                     } else {
-                        ui.label(widgets::caption(format!("Target: {}", self.target)));
+                        ui.label(widgets::caption(trf("Target: {}", &[&self.target])));
                     }
                 });
             });
@@ -116,7 +127,7 @@ impl SaveReviewDialog {
             .column(Column::exact(160.0).clip(true))
             .column(Column::remainder().clip(true))
             .header(theme::HEADER_HEIGHT, |mut header| {
-                for title in ["", "Type", "Target", "Field", "Before", "After"] {
+                for title in ["", tr("Type"), tr("Target"), tr("Field"), tr("Before"), tr("After")] {
                     header.col(|ui| header_cell(ui, title, "", ColumnAlign::Left));
                 }
             })
@@ -170,8 +181,8 @@ impl SaveReviewDialog {
 
 fn kind_style(kind: ReviewKind) -> (&'static str, Color32, &'static str) {
     match kind {
-        ReviewKind::Insert => (icons::INSERTED, color::success(), "Inserted"),
-        ReviewKind::Update => (icons::EDIT, color::warning(), "Updated"),
-        ReviewKind::Delete => (icons::DELETED, color::danger(), "Deleted"),
+        ReviewKind::Insert => (icons::INSERTED, color::success(), tr("Inserted")),
+        ReviewKind::Update => (icons::EDIT, color::warning(), tr("Updated")),
+        ReviewKind::Delete => (icons::DELETED, color::danger(), tr("Deleted")),
     }
 }

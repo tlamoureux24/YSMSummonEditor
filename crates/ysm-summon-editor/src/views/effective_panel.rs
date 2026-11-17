@@ -10,6 +10,7 @@ use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::int_cell::int_cell;
 use crate::widgets::{self, ColumnAlign, RowBand, game_tooltip, header_cell, icon_text, value_color};
+use ysm_core::i18n::{tr, trf};
 
 pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
     // The left margin is the gap to the skill tree card.
@@ -34,11 +35,11 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
                     ui,
                     |ui| {
                         ui.label(RichText::new(icons::EFFECTIVE).size(theme::GLYPH_SIZE).color(color::text_muted()));
-                        widgets::section_title(ui, "Effective Skills");
+                        widgets::section_title(ui, tr("Effective Skills"));
                     },
                     |ui| {
                         if loaded {
-                            ui.label(widgets::caption(format!("Evolution {stage}")));
+                            ui.label(widgets::caption(trf("Evolution {}", &[&stage])));
                         }
                     },
                 );
@@ -46,24 +47,24 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
                 widgets::control_row(
                     ui,
                     |ui| {
-                        ui.label(widgets::caption("All five trees, merged by skill and level"))
-                            .on_hover_text("Editing Min or Max here applies to every merged tree row.");
+                        ui.label(widgets::caption(tr("All five trees, merged by skill and level")))
+                            .on_hover_text(tr("Editing Min or Max here applies to every merged tree row."));
                     },
                     |ui| {
                         if loaded {
-                            ui.label(widgets::caption(format!("{} skills", rows.len())));
+                            ui.label(widgets::caption(trf("{} skills", &[&rows.len()])));
                         }
                     },
                 );
 
                 if !loaded {
-                    widgets::empty_state(ui, icons::EFFECTIVE, "No skills loaded", "Select a summon first.");
+                    widgets::empty_state(ui, icons::EFFECTIVE, tr("No skills loaded"), tr("Select a summon first."));
                 } else if rows.is_empty() {
                     widgets::empty_state(
                         ui,
                         icons::EFFECTIVE,
-                        "No skills",
-                        "This evolution has no skills in its trees.",
+                        tr("No skills"),
+                        tr("This evolution has no skills in its trees."),
                     );
                 } else {
                     grid(ui, view, stage, &rows);
@@ -91,14 +92,17 @@ fn grid(ui: &mut Ui, view: &mut ViewContext<'_>, stage: u8, rows: &[EffectiveRow
         .column(Column::exact(36.0))
         .header(theme::HEADER_HEIGHT, |mut header| {
             header.col(|_| {});
-            header.col(|ui| header_cell(ui, "ID", "Skill ID", ColumnAlign::Center));
-            header.col(|ui| header_cell(ui, "Skill", "Skill name; double-click to edit the skill", ColumnAlign::Left));
-            header
-                .col(|ui| header_cell(ui, "Min", "Lowest minimum skill level of the merged rows", ColumnAlign::Center));
+            header.col(|ui| header_cell(ui, tr("ID"), tr("Skill ID"), ColumnAlign::Center));
             header.col(|ui| {
-                header_cell(ui, "Max", "Highest maximum skill level of the merged rows", ColumnAlign::Center)
+                header_cell(ui, tr("Skill"), tr("Skill name; double-click to edit the skill"), ColumnAlign::Left)
             });
-            header.col(|ui| header_cell(ui, "Lv", "Required summon level", ColumnAlign::Center));
+            header.col(|ui| {
+                header_cell(ui, tr("Min"), tr("Lowest minimum skill level of the merged rows"), ColumnAlign::Center)
+            });
+            header.col(|ui| {
+                header_cell(ui, tr("Max"), tr("Highest maximum skill level of the merged rows"), ColumnAlign::Center)
+            });
+            header.col(|ui| header_cell(ui, tr("Lv"), tr("Required summon level"), ColumnAlign::Center));
         })
         .body(|mut body| {
             let band = RowBand { x: body.max_rect().x_range(), clip: body.ui_mut().clip_rect() };
@@ -125,11 +129,11 @@ fn grid_row(
 
     let menu = |ui: &mut Ui, actions: &mut Vec<Action>| {
         ui.set_min_width(192.0);
-        if ui.button(icon_text(icons::EDIT, "Edit Skill")).clicked() {
+        if ui.button(icon_text(icons::EDIT, tr("Edit Skill"))).clicked() {
             actions.push(Action::EditSkill(row.skill_id));
             ui.close();
         }
-        if ui.button(icon_text(icons::DELETE, "Delete From Tree")).clicked() {
+        if ui.button(icon_text(icons::DELETE, tr("Delete From Tree"))).clicked() {
             actions.push(Action::AskDeleteEffective { stage, skill_id: row.skill_id, lv: row.lv });
             ui.close();
         }
@@ -170,7 +174,7 @@ fn grid_row(
             }
             if row.linked > 1 {
                 ui.label(widgets::caption(format!("×{}", row.linked)))
-                    .on_hover_text(format!("Merged from {} tree rows", row.linked));
+                    .on_hover_text(trf("Merged from {} tree rows", &[&row.linked]));
             }
             ui.with_layout(Layout::left_to_right(Align::Center), |ui| {
                 let name = RichText::new(session.skill_name(row.skill_id)).color(tint);

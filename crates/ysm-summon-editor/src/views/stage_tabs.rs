@@ -8,6 +8,7 @@ use ysm_core::session::TreeState;
 use super::ViewContext;
 use crate::action::Action;
 use crate::widgets::{self, Tab};
+use ysm_core::i18n::{tr, trf};
 
 pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
     let state = view.state;
@@ -19,14 +20,14 @@ pub fn show(ui: &mut Ui, view: &mut ViewContext<'_>) {
             let dirty =
                 session.stages().iter().filter(|s| s.stage == stage).flat_map(|s| &s.trees).any(TreeState::is_changed);
             Tab {
-                title: format!("Evolution {stage}"),
+                title: trf("Evolution {}", &[&stage]),
                 subtitle: summon.map_or_else(String::new, |s| format!("{} · {}", s.summon_name, s.summon_id)),
                 enabled: summon.is_some(),
                 dirty,
                 tooltip: match summon {
-                    Some(summon) => format!("Skill trees and effective skills of {}", summon.summon_name),
-                    None if session.is_loaded() => format!("This chain has no evolution {stage}"),
-                    None => "Select a summon first".to_owned(),
+                    Some(summon) => trf("Skill trees and effective skills of {}", &[&summon.summon_name]),
+                    None if session.is_loaded() => trf("This chain has no evolution {}", &[&stage]),
+                    None => tr("Select a summon first").to_owned(),
                 },
             }
         })

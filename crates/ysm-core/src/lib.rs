@@ -5,6 +5,7 @@
 
 pub mod commit;
 pub mod evolution;
+pub mod i18n;
 pub mod model;
 pub mod random_group;
 pub mod review;

@@ -10,6 +10,7 @@ use crate::dialogs::{Dialog, MessageDialog};
 use crate::state::ConnectionStatus;
 use crate::widgets::toast::ToastKind;
 use crate::worker::Event;
+use ysm_core::i18n::{tr, trf};
 
 impl EditorApp {
     pub(super) fn handle_event(&mut self, event: Event) {
@@ -25,10 +26,10 @@ impl EditorApp {
             Event::Connected(Err(error)) => {
                 self.state.connection = ConnectionStatus::Failed(error.message.clone());
                 self.state.summons.clear();
-                self.set_status("Database connection failed (see details).");
+                self.set_status(tr("Database connection failed (see details)."));
                 self.push_dialog(Dialog::message(MessageDialog::error(
-                    "Database",
-                    "Could not connect to the database. Check the connection in Settings.",
+                    tr("Database"),
+                    tr("Could not connect to the database. Check the connection in Settings."),
                     error,
                 )));
             }
@@ -47,14 +48,14 @@ impl EditorApp {
                 self.state.summons_loading = false;
                 match result {
                     Ok(summons) => {
-                        self.set_status(format!("Loaded {} summons.", summons.len()));
+                        self.set_status(trf("Loaded {} summons.", &[&summons.len()]));
                         self.state.summons = summons;
                     }
                     Err(error) => {
-                        self.set_status("Search failed (see details).");
+                        self.set_status(tr("Search failed (see details)."));
                         self.push_dialog(Dialog::message(MessageDialog::error(
-                            "Search failed",
-                            "Search query failed.",
+                            tr("Search failed"),
+                            tr("Search query failed."),
                             error,
                         )));
                     }
@@ -74,13 +75,13 @@ impl EditorApp {
                         self.state.session.load(*bundle);
                         self.state.active_stage = stage.unwrap_or(3);
                         self.state.active_slot = 1;
-                        self.set_status("Chain loaded.");
+                        self.set_status(tr("Chain loaded."));
                     }
                     Err(error) => {
-                        self.set_status("Chain load failed (see details).");
+                        self.set_status(tr("Chain load failed (see details)."));
                         self.push_dialog(Dialog::message(MessageDialog::error(
-                            "Chain load failed",
-                            "Could not load the evolution chain.",
+                            tr("Chain load failed"),
+                            tr("Could not load the evolution chain."),
                             error,
                         )));
                     }
@@ -89,27 +90,27 @@ impl EditorApp {
 
             Event::SkillDisplayLoaded(Ok(found)) => self.state.session.ingest_skill_display(found),
             Event::SkillDisplayLoaded(Err(error)) => {
-                self.toasts.push(ToastKind::Warning, format!("Skill names could not be loaded. {error}"));
+                self.toasts.push(ToastKind::Warning, trf("Skill names could not be loaded. {}", &[&error]));
             }
 
             Event::RandomGroupsLoaded { requested, result: Ok(found) } => {
                 self.state.session.ingest_random_groups(&requested, found);
             }
             Event::RandomGroupsLoaded { result: Err(error), .. } => {
-                self.toasts.push(ToastKind::Warning, format!("Random groups could not be loaded. {error}"));
+                self.toasts.push(ToastKind::Warning, trf("Random groups could not be loaded. {}", &[&error]));
             }
 
             Event::SkillRecordLoaded { skill_id, result } => match result {
                 Ok(record) => {
-                    self.set_status(format!("Skill {skill_id} loaded."));
+                    self.set_status(trf("Skill {} loaded.", &[&skill_id]));
                     let session = &self.state.session;
                     let dialog =
                         SkillEditDialog::new(record, session.pending_skill(skill_id), session.skill_name(skill_id));
                     self.push_dialog(Dialog::SkillEdit(Box::new(dialog)));
                 }
                 Err(error) => self.push_dialog(Dialog::message(MessageDialog::error(
-                    "Skill edit failed",
-                    "Could not open the skill editor.",
+                    tr("Skill edit failed"),
+                    tr("Could not open the skill editor."),
                     error,
                 ))),
             },
@@ -120,16 +121,16 @@ impl EditorApp {
                     .state
                     .session
                     .chain()
-                    .map_or_else(|| format!("Summon {}", db.summon_id), |chain| chain.stage3.summon_name.clone());
+                    .map_or_else(|| trf("Summon {}", &[&db.summon_id]), |chain| chain.stage3.summon_name.clone());
                 let dialog = StatScalingDialog::new(name, &db, &staged, &creature_enhance);
                 self.push_dialog(Dialog::StatScaling(Box::new(dialog)));
-                self.set_status("Stat scaling loaded.");
+                self.set_status(tr("Stat scaling loaded."));
             }
             Event::ScalingLoaded(Err(error)) => {
-                self.set_status("Stat scaling open failed (see details).");
+                self.set_status(tr("Stat scaling open failed (see details)."));
                 self.push_dialog(Dialog::message(MessageDialog::error(
-                    "Stat scaling",
-                    "Could not open the stat scaling editor.",
+                    tr("Stat scaling"),
+                    tr("Could not open the stat scaling editor."),
                     error,
                 )));
             }
@@ -141,8 +142,8 @@ impl EditorApp {
                     self.push_dialog(Dialog::RandomGroup(Box::new(dialog)));
                 }
                 Err(error) => self.push_dialog(Dialog::message(MessageDialog::error(
-                    "Random group",
-                    "Could not allocate a new random group ID.",
+                    tr("Random group"),
+                    tr("Could not allocate a new random group ID."),
                     error,
                 ))),
             },

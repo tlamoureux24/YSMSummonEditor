@@ -12,6 +12,7 @@ use crate::icons;
 use crate::theme::{self, color, space};
 use crate::widgets::{self, modal};
 use crate::worker::{Command, Event};
+use ysm_core::i18n::{self, Language, tr, trf};
 
 /// Width of ordinary fields; the port field is a short numeric.
 const FIELD_WIDTH: f32 = 280.0;
@@ -69,14 +70,14 @@ impl SettingsDialog {
         let database = &mut self.working.database;
         match self.port_text.trim().parse::<u16>() {
             Ok(port) if port > 0 => database.port = i32::from(port),
-            _ => return Some("Port must be a number between 1 and 65535.".to_owned()),
+            _ => return Some(tr("Port must be a number between 1 and 65535.").to_owned()),
         }
         database.server = database.server.trim().to_owned();
         database.database = database.database.trim().to_owned();
         database.user_id = database.user_id.trim().to_owned();
         self.working.dump_folder_path = self.working.dump_folder_path.trim().to_owned();
         if !database.is_configured() {
-            return Some("Server, Database and User ID are required.".to_owned());
+            return Some(tr("Server, Database and User ID are required.").to_owned());
         }
         None
     }
@@ -85,49 +86,61 @@ impl SettingsDialog {
         let mut save = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::SETTINGS, color::accent_bright(), "Settings", 560.0, |ui| {
+        let outcome = modal::show(ctx, id, icons::SETTINGS, color::accent_bright(), tr("Settings"), 560.0, |ui| {
             ui.spacing_mut().item_spacing.y = space::MD;
 
-            widgets::section_title(ui, "Database");
+            widgets::section_title(ui, tr("Database"));
             self.database_form(ui, env);
 
             ui.add_space(space::XS);
             widgets::divider(ui);
             ui.add_space(space::XS);
 
-            widgets::section_title(ui, "Client dump folder");
-            widgets::form_row(ui, "Folder", |ui| {
+            widgets::section_title(ui, tr("Client dump folder"));
+            widgets::form_row(ui, tr("Folder"), |ui| {
                 ui.add(widgets::sized_text_field(&mut self.working.dump_folder_path, FIELD_WIDTH));
-                if widgets::button(ui, icons::FOLDER, "Browse").clicked()
-                    && let Some(folder) = rfd::FileDialog::new().set_title("Select dump folder").pick_folder()
+                if widgets::button(ui, icons::FOLDER, tr("Browse")).clicked()
+                    && let Some(folder) = rfd::FileDialog::new().set_title(tr("Select dump folder")).pick_folder()
                 {
                     self.working.dump_folder_path = folder.to_string_lossy().into_owned();
                 }
             });
-            help(ui, "Scanned recursively for summon and skill images (png, jpg, bmp, webp, tga, dds).");
+            help(ui, tr("Scanned recursively for summon and skill images (png, jpg, bmp, webp, tga, dds)."));
 
             ui.add_space(space::XS);
             widgets::divider(ui);
             ui.add_space(space::XS);
 
-            widgets::section_title(ui, "Appearance");
-            widgets::form_row(ui, "Theme", |ui| {
+            widgets::section_title(ui, tr("Appearance"));
+            widgets::form_row(ui, tr("Theme"), |ui| {
                 let segments = ThemeChoice::ALL.map(|choice| match choice {
                     ThemeChoice::Dark => {
-                        widgets::Segment { icon: icons::THEME_DARK, label: "Dark", tooltip: "Dark theme" }
+                        widgets::Segment { icon: icons::THEME_DARK, label: tr("Dark"), tooltip: tr("Dark theme") }
                     }
                     ThemeChoice::Light => {
-                        widgets::Segment { icon: icons::THEME_LIGHT, label: "Light", tooltip: "Light theme" }
+                        widgets::Segment { icon: icons::THEME_LIGHT, label: tr("Light"), tooltip: tr("Light theme") }
                     }
                     ThemeChoice::System => widgets::Segment {
                         icon: icons::THEME_SYSTEM,
-                        label: "System",
-                        tooltip: "Follow the operating system's setting",
+                        label: tr("System"),
+                        tooltip: tr("Follow the operating system's setting"),
                     },
                 });
                 let selected = ThemeChoice::ALL.iter().position(|c| *c == self.working.theme).unwrap_or(0);
                 if let Some(index) = widgets::segmented(ui, &segments, selected, 96.0) {
                     self.working.theme = ThemeChoice::ALL[index];
+                }
+            });
+            widgets::form_row(ui, tr("Language"), |ui| {
+                let segments = Language::ALL.map(|language| widgets::Segment {
+                    icon: icons::LANGUAGE,
+                    label: language.native_name(),
+                    tooltip: tr("Interface and game texts (StringResource, or StringResource_EN in English when the database has it)"),
+                });
+                let current = self.working.language.unwrap_or_else(i18n::language);
+                let selected = Language::ALL.iter().position(|l| *l == current).unwrap_or(0);
+                if let Some(index) = widgets::segmented(ui, &segments, selected, 112.0) {
+                    self.working.language = Some(Language::ALL[index]);
                 }
             });
 
@@ -137,17 +150,17 @@ impl SettingsDialog {
 
             let dirty = self.is_dirty();
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
-                let clicked = widgets::primary_button_enabled(ui, dirty, icons::SAVE, "Save").clicked();
+                let clicked = widgets::primary_button_enabled(ui, dirty, icons::SAVE, tr("Save")).clicked();
                 if clicked || (dirty && modal::enter_pressed(ui)) {
                     self.validation = self.validate();
                     save = self.validation.is_none();
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
                     if dirty {
-                        ui.label(widgets::caption("Unsaved changes"));
+                        ui.label(widgets::caption(tr("Unsaved changes")));
                     }
                 });
             });
@@ -165,13 +178,13 @@ impl SettingsDialog {
         let database = &mut self.working.database;
         let mut edited = false;
 
-        widgets::form_row(ui, "Server type", |ui| {
+        widgets::form_row(ui, tr("Server type"), |ui| {
             let segments = DbProvider::ALL.map(|provider| widgets::Segment {
                 icon: icons::DATABASE,
                 label: provider.label(),
                 tooltip: match provider {
-                    DbProvider::Mssql => "Microsoft SQL Server",
-                    DbProvider::PostgreSql => "PostgreSQL; tables are found through the database's search_path",
+                    DbProvider::Mssql => tr("Microsoft SQL Server"),
+                    DbProvider::PostgreSql => tr("PostgreSQL; tables are found through the database's search_path"),
                 },
             });
             let selected = DbProvider::ALL.iter().position(|p| *p == database.provider).unwrap_or(0);
@@ -187,46 +200,50 @@ impl SettingsDialog {
                 }
             }
         });
-        widgets::form_row(ui, "Server", |ui| {
+        widgets::form_row(ui, tr("Server"), |ui| {
             let field =
-                widgets::sized_text_field(&mut database.server, FIELD_WIDTH).hint_text("Host name or IP address");
+                widgets::sized_text_field(&mut database.server, FIELD_WIDTH).hint_text(tr("Host name or IP address"));
             edited |= ui.add(field).changed();
         });
-        widgets::form_row(ui, "Port", |ui| {
+        widgets::form_row(ui, tr("Port"), |ui| {
             edited |= ui.add(widgets::sized_text_field(&mut self.port_text, PORT_WIDTH)).changed();
         });
-        widgets::form_row(ui, "Database", |ui| {
+        widgets::form_row(ui, tr("Database"), |ui| {
             edited |= ui.add(widgets::sized_text_field(&mut database.database, FIELD_WIDTH)).changed();
         });
-        widgets::form_row(ui, "User ID", |ui| {
+        widgets::form_row(ui, tr("User ID"), |ui| {
             edited |= ui.add(widgets::sized_text_field(&mut database.user_id, FIELD_WIDTH)).changed();
         });
-        widgets::form_row(ui, "Password", |ui| {
+        widgets::form_row(ui, tr("Password"), |ui| {
             // Narrower by the reveal button, so the row ends where the other fields end.
             let width = FIELD_WIDTH - theme::CONTROL_HEIGHT - space::SM;
             let field = widgets::sized_text_field(&mut database.password, width).password(!self.show_password);
             edited |= ui.add(field).changed();
-            let (icon, hint) =
-                if self.show_password { (icons::HIDE, "Hide password") } else { (icons::SHOW, "Show password") };
+            let (icon, hint) = if self.show_password {
+                (icons::HIDE, tr("Hide password"))
+            } else {
+                (icons::SHOW, tr("Show password"))
+            };
             if widgets::icon_button(ui, icon, hint).clicked() {
                 self.show_password = !self.show_password;
             }
         });
         match database.provider {
             DbProvider::Mssql => {
-                help(ui, "Stored in plain text in settings.json under %LOCALAPPDATA%\\YSMSummonEditor.");
-                widgets::form_row(ui, "Trust server certificate", |ui| {
-                    edited |= widgets::toggle(ui, &mut database.trust_server_certificate, "Trust server certificate")
-                        .on_hover_text(
-                            "Accept the server's certificate without validating it; usual for a local server.",
-                        )
-                        .changed();
+                help(ui, tr("Stored in plain text in settings.json under %LOCALAPPDATA%\\YSMSummonEditor."));
+                widgets::form_row(ui, tr("Trust server certificate"), |ui| {
+                    edited |=
+                        widgets::toggle(ui, &mut database.trust_server_certificate, tr("Trust server certificate"))
+                            .on_hover_text(tr(
+                                "Accept the server's certificate without validating it; usual for a local server.",
+                            ))
+                            .changed();
                 });
             }
             DbProvider::PostgreSql => help(
                 ui,
-                "Leave empty to read it from the PostgreSQL password file (PGPASSFILE, ~/.pgpass or \
-                 %APPDATA%\\postgresql\\pgpass.conf). A password typed here is stored in plain text in settings.json.",
+                tr("Leave empty to read it from the PostgreSQL password file (PGPASSFILE, ~/.pgpass or \
+                    %APPDATA%\\postgresql\\pgpass.conf). A password typed here is stored in plain text in settings.json."),
             ),
         }
 
@@ -237,9 +254,11 @@ impl SettingsDialog {
 
         widgets::form_row(ui, "", |ui| {
             let running = matches!(self.test, TestState::Running);
-            let label = if running { "Testing…" } else { "Test connection" };
-            let test = widgets::button_enabled(ui, !running && !self.demo, icons::CONNECTION, label)
-                .on_disabled_hover_text(if self.demo { "Not available in demo mode" } else { "Test in progress" });
+            let label = if running { tr("Testing…") } else { tr("Test connection") };
+            let test =
+                widgets::button_enabled(ui, !running && !self.demo, icons::CONNECTION, label).on_disabled_hover_text(
+                    if self.demo { tr("Not available in demo mode") } else { tr("Test in progress") },
+                );
             if test.clicked() {
                 self.validation = self.validate();
                 if self.validation.is_none() {
@@ -253,11 +272,11 @@ impl SettingsDialog {
                     ui.spinner();
                 }
                 TestState::Passed(server) => {
-                    ui.label(RichText::new(format!("{}  Connected", icons::SUCCESS)).color(color::success()))
+                    ui.label(RichText::new(trf("{}  Connected", &[&icons::SUCCESS])).color(color::success()))
                         .on_hover_text(server.as_str());
                 }
                 TestState::Failed(error) => {
-                    ui.label(RichText::new(format!("{}  Failed", icons::ERROR)).color(color::danger()))
+                    ui.label(RichText::new(trf("{}  Failed", &[&icons::ERROR])).color(color::danger()))
                         .on_hover_text(error.as_str());
                 }
             }

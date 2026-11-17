@@ -9,6 +9,7 @@ use crate::icons;
 use crate::theme::color;
 use crate::widgets::{self, modal};
 use crate::worker::Event;
+use ysm_core::i18n::tr;
 
 const LIST_HEIGHT: f32 = 432.0;
 
@@ -28,8 +29,8 @@ impl SkillPickerDialog {
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
         let title = match self.purpose {
-            PickerPurpose::AddRow(_) => "Add Skill",
-            PickerPurpose::ChangeSkill(..) => "Change Skill",
+            PickerPurpose::AddRow(_) => tr("Add Skill"),
+            PickerPurpose::ChangeSkill(..) => tr("Change Skill"),
         };
         let mut picked = None;
         let mut cancelled = false;
@@ -38,7 +39,7 @@ impl SkillPickerDialog {
             widgets::control_row(
                 ui,
                 |ui| {
-                    widgets::section_title(ui, "All skills");
+                    widgets::section_title(ui, tr("All skills"));
                 },
                 |ui| self.search.status(ui),
             );
@@ -47,15 +48,15 @@ impl SkillPickerDialog {
             }
 
             modal::footer(ui, |ui| {
-                if widgets::button(ui, icons::CLOSE, "Cancel").clicked() {
+                if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
                 let selected = self.search.selected_skill().cloned();
-                if widgets::primary_button_enabled(ui, selected.is_some(), icons::CHECK, "Select").clicked() {
+                if widgets::primary_button_enabled(ui, selected.is_some(), icons::CHECK, tr("Select")).clicked() {
                     picked = selected;
                 }
                 ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.label(widgets::caption("Double-click a skill or press Enter to pick it."));
+                    ui.label(widgets::caption(tr("Double-click a skill or press Enter to pick it.")));
                 });
             });
         });
