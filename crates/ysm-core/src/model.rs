@@ -327,6 +327,9 @@ pub struct StatScalingSnapshot {
     pub growth_depth: i32,
     pub base_stats: StatBlock,
     pub stage_bonuses: Vec<LevelBonusStage>,
+    /// Highest summon level the server allows, when the database says it
+    /// (the last level of `SummonLevelResource`); `None` keeps the model's own.
+    pub max_level: Option<i32>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

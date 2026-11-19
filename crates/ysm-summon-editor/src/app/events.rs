@@ -129,7 +129,13 @@ impl EditorApp {
                     return;
                 };
                 let name = chain.stage3.summon_name.clone();
-                let model = if !self.state.demo && self.state.settings.database.engine == DatabaseEngine::MariaDb {
+                // AurumisRZ (MariaDB) and the Rappelz AIO NG server (PostgreSQL) both run the
+                // official GetSummonLevelBonus: the current form's bonus row only.
+                let model = if !self.state.demo
+                    && matches!(
+                        self.state.settings.database.engine,
+                        DatabaseEngine::MariaDb | DatabaseEngine::PostgreSql
+                    ) {
                     GrowthModel::Aurumis
                 } else {
                     GrowthModel::Legacy

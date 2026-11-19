@@ -53,6 +53,8 @@ pub struct StatScalingDialog {
     earlier_forms: Vec<StatScalingSnapshot>,
     amplify: BTreeMap<i32, Decimal>,
     model: GrowthModel,
+    /// Highest level of the calculator and the chart.
+    max_level: i32,
     tuning: Option<Stage3Tuning>,
     level: i32,
     enhance_stage: i32,
@@ -78,6 +80,7 @@ impl StatScalingDialog {
             earlier_forms,
             // Later rows win when an enhance level is listed twice.
             amplify: creature_enhance.iter().map(|e| (e.enhance_level, e.stat_amplify)).collect(),
+            max_level: model.max_level_for(db),
             model,
             tuning: None,
             level: MIN_LEVEL,
@@ -206,7 +209,7 @@ impl StatScalingDialog {
             height,
             &self.curve,
             &mut self.level,
-            self.model.max_level(),
+            self.max_level,
             &stage_markers,
             self.model == GrowthModel::Aurumis,
         );
@@ -453,7 +456,7 @@ impl StatScalingDialog {
                 ui.label(tr("Enhance"));
                 ui.add_space(space::MD);
                 ui.spacing_mut().slider_width = 136.0;
-                ui.add(egui::Slider::new(&mut self.level, MIN_LEVEL..=self.model.max_level()));
+                ui.add(egui::Slider::new(&mut self.level, MIN_LEVEL..=self.max_level));
                 ui.label(tr("Level"));
             });
         });
@@ -559,6 +562,7 @@ mod tests {
     #[test]
     fn three_stage_chart_can_hover_and_choose_a_level_at_minimum_window_size() {
         let snapshot = StatScalingSnapshot {
+            max_level: None,
             summon_id: 1,
             stat_id: 1,
             evolve_type: 3,

@@ -223,7 +223,24 @@ pub(super) async fn stat_scaling(client: &Client, summon_id: i32) -> PgResult<Op
         })
         .collect();
 
-    Ok(Some(StatScalingSnapshot { summon_id, stat_id, evolve_type, growth_depth: depth, base_stats, stage_bonuses }))
+    // The server caps summon levels at the end of its experience table (and game.max_creature_level).
+    let has_levels: bool = client.query_one("SELECT to_regclass('summonlevelresource') IS NOT NULL", &[]).await?.get(0);
+    let max_level = if has_levels {
+        Cells::new(&client.query_one("SELECT MAX(level) FROM SummonLevelResource", &[]).await?).i32()
+    } else {
+        0
+    };
+    let max_level = (max_level > 0).then_some(max_level);
+
+    Ok(Some(StatScalingSnapshot {
+        summon_id,
+        stat_id,
+        evolve_type,
+        growth_depth: depth,
+        base_stats,
+        stage_bonuses,
+        max_level,
+    }))
 }
 
 pub(super) async fn creature_enhance(client: &Client) -> PgResult<Vec<CreatureEnhance>> {

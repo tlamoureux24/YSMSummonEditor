@@ -242,6 +242,7 @@ mod tests {
         });
 
         let db = crate::model::StatScalingSnapshot {
+            max_level: None,
             summon_id: 3,
             stat_id: 90,
             evolve_type: 1,

@@ -274,7 +274,15 @@ pub(super) async fn stat_scaling(client: &mut ReadClient, summon_id: i32) -> Res
         })
         .collect();
 
-    Ok(Some(StatScalingSnapshot { summon_id, stat_id, evolve_type, growth_depth: depth, base_stats, stage_bonuses }))
+    Ok(Some(StatScalingSnapshot {
+        summon_id,
+        stat_id,
+        evolve_type,
+        growth_depth: depth,
+        base_stats,
+        stage_bonuses,
+        max_level: None,
+    }))
 }
 
 pub(super) async fn creature_enhance(client: &mut ReadClient) -> Result<Vec<CreatureEnhance>> {

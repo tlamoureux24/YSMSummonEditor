@@ -191,6 +191,7 @@ mod tests {
             exists_in_db,
         };
         StatScalingSnapshot {
+            max_level: None,
             summon_id: 3,
             stat_id: 90,
             evolve_type: 2,

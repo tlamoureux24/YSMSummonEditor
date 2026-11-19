@@ -216,6 +216,7 @@ impl SummonRepository for InMemoryRepository {
             .collect();
 
         Ok(StatScalingSnapshot {
+            max_level: None,
             summon_id,
             stat_id: summon.stat_id,
             evolve_type: summon.form,

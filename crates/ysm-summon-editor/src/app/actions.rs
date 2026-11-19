@@ -102,8 +102,10 @@ impl EditorApp {
                 if let Some(chain) = self.state.session.chain() {
                     let summon_id = chain.stage3.summon_id;
                     let earlier_ids = if !self.state.demo
-                        && self.state.settings.database.engine == ysm_data::DatabaseEngine::MariaDb
-                    {
+                        && matches!(
+                            self.state.settings.database.engine,
+                            ysm_data::DatabaseEngine::MariaDb | ysm_data::DatabaseEngine::PostgreSql
+                        ) {
                         chain.ordered().iter().map(|form| form.summon_id).filter(|id| *id != summon_id).collect()
                     } else {
                         Vec::new()

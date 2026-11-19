@@ -29,6 +29,15 @@ impl GrowthModel {
         }
     }
 
+    /// [`Self::max_level`], or the server's own cap for the current-form
+    /// model when the database gives it.
+    pub fn max_level_for(self, snapshot: &StatScalingSnapshot) -> i32 {
+        match (self, snapshot.max_level) {
+            (Self::Aurumis, Some(level)) if level >= MIN_LEVEL => level,
+            _ => self.max_level(),
+        }
+    }
+
     pub fn stage3_gain(self, coefficient: Decimal) -> i32 {
         let [start, end] = TUNING_LEVELS;
         self.bonus_at(coefficient, 3, end).saturating_sub(self.bonus_at(coefficient, 3, start))
@@ -67,7 +76,7 @@ impl GrowthModel {
         enhance_amplify: &BTreeMap<i32, Decimal>,
         enhance_stage: i32,
     ) -> Vec<[i32; STAT_COUNT]> {
-        (MIN_LEVEL..=self.max_level())
+        (MIN_LEVEL..=self.max_level_for(snapshot))
             .map(|level| {
                 final_values(self.calculate(&ScalingInput { level, enhance_stage, enhance_amplify, snapshot }))
             })
@@ -191,7 +200,9 @@ pub fn aurumis_progression_curve(
     enhance_amplify: &BTreeMap<i32, Decimal>,
     enhance_stage: i32,
 ) -> Vec<[i32; STAT_COUNT]> {
-    (MIN_LEVEL..=GrowthModel::Aurumis.max_level())
+    let max_level =
+        forms.last().map_or(GrowthModel::Aurumis.max_level(), |form| GrowthModel::Aurumis.max_level_for(form));
+    (MIN_LEVEL..=max_level)
         .filter_map(|level| aurumis_progression_at(forms, level, enhance_amplify, enhance_stage))
         .map(|(_, result)| final_values(result))
         .collect()
@@ -243,7 +254,7 @@ pub fn calculate(input: &ScalingInput<'_>) -> ScalingResult {
 
 fn calculate_with_model(input: &ScalingInput<'_>, model: GrowthModel) -> ScalingResult {
     let snapshot = input.snapshot;
-    let level = input.level.clamp(MIN_LEVEL, model.max_level());
+    let level = input.level.clamp(MIN_LEVEL, model.max_level_for(snapshot));
     let previous_level = (level - 1).max(0);
     let enhance_stage = input.enhance_stage.clamp(0, MAX_ENHANCE_STAGE);
     let stat_amplify = input.enhance_amplify.get(&enhance_stage).copied().unwrap_or(Decimal::ZERO);
@@ -340,6 +351,7 @@ mod tests {
         let mut base = StatBlock::zero(1);
         base.values[0] = base_str;
         StatScalingSnapshot {
+            max_level: None,
             summon_id: 100,
             stat_id: 1,
             evolve_type: depth,
@@ -488,5 +500,29 @@ mod tests {
         assert!(GrowthModel::Aurumis.stage3_gain(balanced[0]) >= 14);
         snap.evolve_type = 2;
         assert!(suggest_stage3(&snap, GrowthModel::Aurumis, Stage3Preset::Balanced).is_none());
+    }
+
+    #[test]
+    fn current_form_model_follows_the_server_level_cap_and_formula() {
+        // Rappelz AIO NG: the last level of SummonLevelResource is 220.
+        let mut gladiator = snapshot(3, 388, &[(1, "0.9"), (2, "0.8"), (3, "0.4")]);
+        gladiator.max_level = Some(220);
+        let amplify = BTreeMap::new();
+        let strength = |level| {
+            GrowthModel::Aurumis
+                .calculate(&ScalingInput { level, enhance_stage: 0, enhance_amplify: &amplify, snapshot: &gladiator })
+                .rows[0]
+                .final_value
+        };
+
+        assert_eq!(GrowthModel::Aurumis.max_level_for(&gladiator), 220);
+        // GetSummonLevelBonus: base + bonus of the current form x (level + 1 - (depth - 1) x 50).
+        assert_eq!(strength(220), 388 + 48);
+        assert_eq!(strength(250), strength(220), "capped at the server's maximum");
+        assert_eq!(GrowthModel::Aurumis.growth_curve(&gladiator, &amplify, 0).len(), 220);
+
+        gladiator.max_level = None;
+        assert_eq!(GrowthModel::Aurumis.max_level_for(&gladiator), 200, "without a cap the model keeps its own");
+        assert_eq!(GrowthModel::Legacy.max_level_for(&gladiator), MAX_LEVEL);
     }
 }
