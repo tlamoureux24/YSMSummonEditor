@@ -1,4 +1,4 @@
-//! MSSQL implementation of [`SummonRepository`] on top of tiberius.
+//! SQL Server and MariaDB implementations of [`SummonRepository`].
 //!
 //! The repository owns a single-threaded tokio runtime and one lazily opened
 //! connection, so its blocking methods can be called from a plain worker
@@ -7,6 +7,10 @@
 mod cells;
 mod commit;
 mod queries;
+mod read;
+
+#[cfg(test)]
+mod mariadb_tests;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -15,7 +19,7 @@ use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
-use ysm_core::commit::{CommitRequest, CommitResult, tree_slot_column};
+use ysm_core::commit::{CommitRequest, CommitResult, is_updatable_skill_column, tree_slot_column};
 use ysm_core::model::{
     CreatureEnhance, LevelBonusUsage, RandomGroupUsage, SkillDisplay, SkillTreeEntry, SkillUsage, StatScalingSnapshot,
     StatUsage, SummonListFilter, SummonListItem, TreeUsage,
@@ -23,7 +27,8 @@ use ysm_core::model::{
 use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::value::SkillRecord;
 
-use crate::settings::DbSettings;
+use self::read::{ReadClient, connect_mariadb, mariadb_error};
+use crate::settings::{DatabaseEngine, DbSettings};
 use crate::{DataError, Result, SummonRepository};
 
 type SqlClient = Client<Compat<TcpStream>>;
@@ -47,15 +52,17 @@ impl Default for Timeouts {
     }
 }
 
-pub struct MssqlRepository {
+pub struct SqlRepository {
     runtime: Runtime,
     settings: DbSettings,
     timeouts: Timeouts,
-    client: Option<SqlClient>,
+    client: Option<ReadClient>,
     last_used: Instant,
 }
 
-impl MssqlRepository {
+pub type MssqlRepository = SqlRepository;
+
+impl SqlRepository {
     /// Creates the repository. No connection is opened until the first query.
     pub fn new(settings: DbSettings) -> Result<Self> {
         Self::with_timeouts(settings, Timeouts::default())
@@ -70,40 +77,42 @@ impl MssqlRepository {
     }
 
     /// Runs one database operation, opening the connection first when needed.
-    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut SqlClient) -> SqlResult<T>) -> Result<T> {
+    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut ReadClient) -> Result<T>) -> Result<T> {
         let Self { runtime, settings, timeouts, client, last_used } = self;
         runtime.block_on(async {
             if let Some(existing) = client.as_mut()
                 && last_used.elapsed() > IDLE_CHECK_AFTER
-                && !is_alive(existing).await
+                && !existing.is_alive().await
             {
                 *client = None;
             }
 
             let connection = match client {
                 Some(connection) => connection,
-                None => client.insert(connect(settings, *timeouts).await?),
+                None => {
+                    let connection = match settings.engine {
+                        DatabaseEngine::SqlServer => {
+                            ReadClient::SqlServer(Box::new(connect(settings, *timeouts).await?), timeouts.command)
+                        }
+                        DatabaseEngine::MariaDb => ReadClient::MariaDb(Box::new(connect_mariadb(settings, *timeouts)?)),
+                        DatabaseEngine::PostgreSql => {
+                            return Err(DataError::Invalid("PostgreSQL is served by PgRepository".into()));
+                        }
+                    };
+                    client.insert(connection)
+                }
             };
             let outcome = operation(connection).await;
             *last_used = Instant::now();
 
-            outcome.map_err(|error| {
-                let failure = classify(&error, timeouts.command);
+            outcome.inspect_err(|failure| {
                 // Errors reported by the server leave the connection usable. After anything
                 // else it is out of sync with the server and must not be reused.
                 if failure.is_connection_problem() {
                     *client = None;
                 }
-                failure
             })
         })
-    }
-}
-
-async fn is_alive(client: &mut SqlClient) -> bool {
-    match client.simple_query("SELECT 1;").await {
-        Ok(stream) => stream.into_results().await.is_ok(),
-        Err(_) => false,
     }
 }
 
@@ -177,7 +186,7 @@ fn validate(request: &CommitRequest) -> Result<()> {
     }
 }
 
-impl SummonRepository for MssqlRepository {
+impl SummonRepository for SqlRepository {
     fn test_connection(&mut self) -> Result<String> {
         self.run(async |c| queries::server_version(c).await)
     }
@@ -270,8 +279,27 @@ impl SummonRepository for MssqlRepository {
     }
 
     fn commit(&mut self, request: &CommitRequest) -> Result<CommitResult> {
+        use mysql::prelude::Queryable;
+
         validate(request)?;
-        self.run(async |c| commit::commit(c, request).await)
+        self.run(async |client| match client {
+            ReadClient::SqlServer(client, timeout) => {
+                commit::commit(client, request).await.map_err(|error| classify(&error, *timeout))
+            }
+            ReadClient::MariaDb(client) => {
+                let sql = ysm_core::sql_script::mariadb_batch(request);
+                client.query_drop(sql).map_err(mariadb_error)?;
+                Ok(CommitResult {
+                    updated_trees: request.trees.len(),
+                    updated_skills: request
+                        .skills
+                        .iter()
+                        .filter(|skill| skill.changes.iter().any(is_updatable_skill_column))
+                        .count(),
+                    updated_random_groups: request.random_groups.iter().filter(|group| group.group_id > 0).count(),
+                })
+            }
+        })
     }
 }
 

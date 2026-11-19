@@ -99,7 +99,15 @@ impl EditorApp {
             }
             Action::OpenStats => {
                 if let Some(chain) = self.state.session.chain() {
-                    self.worker.send(Command::LoadScaling { summon_id: chain.stage3.summon_id });
+                    let summon_id = chain.stage3.summon_id;
+                    let earlier_ids = if !self.state.demo
+                        && self.state.settings.database.engine == ysm_data::DatabaseEngine::MariaDb
+                    {
+                        chain.ordered().iter().map(|form| form.summon_id).filter(|id| *id != summon_id).collect()
+                    } else {
+                        Vec::new()
+                    };
+                    self.worker.send(Command::LoadScaling { summon_id, earlier_ids });
                     self.set_status("Loading stat scaling…");
                 }
             }
@@ -260,11 +268,16 @@ impl EditorApp {
                     self.set_status("Random group detached from the selected row.");
                 }
             }
-            Action::ApplyRandomGroup { tree, uid, group } => {
+            Action::ApplyRandomGroup { attach_to, group } => {
                 let (group_id, use_code) = (group.group_id, group.use_code());
-                if self.state.session.attach_group(tree, uid, group) {
-                    self.set_status(format!("Random group {group_id} staged (UseCode: {use_code})."));
+                if let Some((tree, uid)) = attach_to {
+                    if !self.state.session.attach_group(tree, uid, group) {
+                        return;
+                    }
+                } else {
+                    self.state.session.stage_random_group(group);
                 }
+                self.set_status(format!("Random group {group_id} staged (UseCode: {use_code})."));
             }
             Action::ApplyScaling(result) => {
                 self.state.session.apply_scaling_edit(result);

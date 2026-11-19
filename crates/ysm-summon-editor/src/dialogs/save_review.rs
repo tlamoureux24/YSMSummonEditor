@@ -1,5 +1,8 @@
 //! Review of everything a save will change, with the equivalent SQL script.
 
+mod sql;
+
+use eframe::egui::text::LayoutJob;
 use eframe::egui::{self, Align, Color32, Layout, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 use ysm_core::review::{ReviewKind, ReviewRow};
@@ -21,7 +24,7 @@ enum Tab {
 
 pub struct SaveReviewDialog {
     rows: Vec<ReviewRow>,
-    sql: String,
+    sql: LayoutJob,
     /// Whether confirming exports a file instead of writing to the database.
     to_sql_file: bool,
     /// Where a database save would go, for the footer.
@@ -31,7 +34,7 @@ pub struct SaveReviewDialog {
 
 impl SaveReviewDialog {
     pub fn new(rows: Vec<ReviewRow>, sql: String, to_sql_file: bool, target: String) -> Self {
-        Self { rows, sql, to_sql_file, target, tab: Tab::Changes }
+        Self { rows, sql: sql::layout(&sql), to_sql_file, target, tab: Tab::Changes }
     }
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
@@ -57,7 +60,7 @@ impl SaveReviewDialog {
                 |ui| {
                     // Always present, so switching tabs does not shift the row.
                     if widgets::button(ui, icons::CLIPBOARD, "Copy SQL").clicked() {
-                        actions.push(Action::CopyText(sql.clone()));
+                        actions.push(Action::CopyText(sql.text.clone()));
                         actions.push(Action::Toast(ToastKind::Info, "SQL script copied to the clipboard.".into()));
                     }
                 },
@@ -162,7 +165,7 @@ impl SaveReviewDialog {
                 .max_height(height)
                 .min_scrolled_height(height)
                 .show(ui, |ui| {
-                    ui.add(egui::Label::new(RichText::new(&self.sql).monospace()).extend());
+                    ui.add(egui::Label::new(self.sql.clone()).extend().selectable(true));
                 });
         });
     }

@@ -98,8 +98,7 @@ pub enum Action {
     AskDetachGroup(TreeRef, u64),
     DetachGroup(TreeRef, u64),
     ApplyRandomGroup {
-        tree: TreeRef,
-        uid: u64,
+        attach_to: Option<(TreeRef, u64)>,
         group: RandomSkillGroup,
     },
     ApplyScaling(ScalingEditResult),

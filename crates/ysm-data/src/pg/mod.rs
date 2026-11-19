@@ -261,7 +261,7 @@ impl SummonRepository for PgRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::settings::DbProvider;
+    use crate::settings::DatabaseEngine;
 
     fn settings_for(port: u16) -> DbSettings {
         DbSettings {
@@ -270,13 +270,13 @@ mod tests {
             database: "db".into(),
             user_id: "user".into(),
             password: "x".into(),
-            ..DbSettings::for_provider(DbProvider::PostgreSql)
+            ..DbSettings::for_engine(DatabaseEngine::PostgreSql)
         }
     }
 
     #[test]
     fn unconfigured_settings_are_rejected_without_connecting() {
-        let empty = DbSettings::for_provider(DbProvider::PostgreSql);
+        let empty = DbSettings::for_engine(DatabaseEngine::PostgreSql);
         assert!(matches!(PgRepository::new(empty), Err(DataError::NotConfigured)));
     }
 
@@ -311,7 +311,7 @@ mod tests {
     fn live_database_smoke_test() {
         let connection_string =
             std::env::var("YSM_PG_TEST_CONNECTION").expect("set YSM_PG_TEST_CONNECTION to run this test");
-        let settings = crate::env_local::parse_connection_string_for(DbProvider::PostgreSql, &connection_string)
+        let settings = crate::env_local::parse_connection_string_for(DatabaseEngine::PostgreSql, &connection_string)
             .expect("valid connection string");
         let mut repo = PgRepository::new(settings).unwrap();
 

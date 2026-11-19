@@ -11,7 +11,8 @@ use ysm_core::commit::{CommitRequest, CommitResult};
 use ysm_core::model::SummonListItem;
 use ysm_core::review::build_review_rows;
 use ysm_core::save_plan::{SaveAnswer, SavePlanner, SaveQuestion, UsageReport};
-use ysm_core::sql_script::render_script;
+use ysm_core::sql_script::{SqlDialect, render_script};
+use ysm_data::DatabaseEngine;
 
 use super::EditorApp;
 use crate::action::Action;
@@ -104,8 +105,7 @@ impl EditorApp {
 
         let request = planner.finish();
         let rows = build_review_rows(&self.state.session, &request);
-        let dialect = self.state.settings.database.provider.sql_dialect();
-        let sql = render_script(&request, &Local::now().format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
+        let sql = self.render_change_script(&request);
         let settings = &self.state.settings;
         let target =
             if self.state.demo { "demo data (in memory)".to_owned() } else { settings.database.display_target() };
@@ -179,8 +179,7 @@ impl EditorApp {
             return;
         };
 
-        let dialect = self.state.settings.database.provider.sql_dialect();
-        let sql = render_script(request, &now.format("%Y-%m-%d %H:%M:%S").to_string(), dialect);
+        let sql = self.render_change_script(request);
         if let Err(error) = std::fs::write(&path, sql) {
             self.save_failed("The SQL file could not be written.", error.to_string());
             return;
@@ -199,6 +198,17 @@ impl EditorApp {
                 ));
             }
         }
+    }
+
+    fn render_change_script(&self, request: &CommitRequest) -> String {
+        let generated_at = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
+        let dialect = match self.state.settings.database.engine {
+            _ if self.state.demo => SqlDialect::TSql,
+            DatabaseEngine::SqlServer => SqlDialect::TSql,
+            DatabaseEngine::MariaDb => SqlDialect::MariaDb,
+            DatabaseEngine::PostgreSql => SqlDialect::PostgreSql,
+        };
+        render_script(request, &generated_at, dialect)
     }
 
     pub(super) fn on_commit_confirmed(&mut self) {

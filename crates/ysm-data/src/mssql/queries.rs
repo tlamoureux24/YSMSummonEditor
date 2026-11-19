@@ -1,11 +1,8 @@
-//! Read queries. The SQL is carried over verbatim from the original
-//! `SqlServerSummonEditorRepository`; only ID lists are inlined as integer
-//! literals instead of being expanded into parameters.
+//! Read queries shared by the SQL Server and MariaDB repositories.
 
 use std::collections::HashMap;
 
 use rust_decimal::Decimal;
-use tiberius::Row;
 use ysm_core::evolution::growth_depth;
 use ysm_core::model::{
     CreatureEnhance, LevelBonusStage, LevelBonusUsage, RandomGroupUsage, STAT_COUNT, SkillDisplay, SkillTreeEntry,
@@ -15,17 +12,18 @@ use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::value::{SkillField, SkillRecord};
 
 use super::cells::{Cells, cell_field};
-use super::{SqlClient, SqlResult};
+use super::read::{ReadClient, ReadRow};
+use crate::Result;
 
 const SUMMON_PROJECTION: &str = "
     SELECT
         s.[id] AS SummonId,
-        ISNULL(sn.[value], CONCAT('Summon ', s.[id])) AS SummonName,
+        COALESCE(sn.[value], CONCAT('Summon ', s.[id])) AS SummonName,
         cn.[value] AS CardName,
         s.[card_id] AS CardId,
         s.[evolve_target] AS EvolveTarget,
         s.[form] AS Form,
-        CAST(s.[is_riding_only] AS bit) AS IsRidingOnly,
+        s.[is_riding_only] AS IsRidingOnly,
         s.[face_file_name] AS FaceFileName,
         s.[illust_file_name] AS IllustFileName,
         sf.[value] AS FeatureText,
@@ -42,13 +40,21 @@ const SUMMON_PROJECTION: &str = "
     LEFT JOIN [StringResource] cn ON ir.[name_id] = cn.[code]
 ";
 
+const SUMMON_SLOTS: &str = "
+    SELECT id, name_id, skill_tree1_id AS skill_tree_id, 1 AS slot_index FROM SummonResource
+    UNION ALL SELECT id, name_id, skill_tree2_id, 2 FROM SummonResource
+    UNION ALL SELECT id, name_id, skill_tree3_id, 3 FROM SummonResource
+    UNION ALL SELECT id, name_id, skill_tree4_id, 4 FROM SummonResource
+    UNION ALL SELECT id, name_id, skill_tree5_id, 5 FROM SummonResource
+";
+
 /// Renders IDs as a literal list for `IN (...)`. Safe: the values are integers.
 pub(super) fn in_list(ids: &[i32]) -> String {
     ids.iter().map(i32::to_string).collect::<Vec<_>>().join(", ")
 }
 
-fn summon(row: Row) -> SummonListItem {
-    let mut c = Cells::new(row);
+fn summon(row: ReadRow) -> SummonListItem {
+    let mut c = Cells::new(row.values.into_iter());
     SummonListItem {
         summon_id: c.i32(),
         summon_name: c.string(),
@@ -65,31 +71,46 @@ fn summon(row: Row) -> SummonListItem {
     }
 }
 
-pub(super) async fn server_version(client: &mut SqlClient) -> SqlResult<String> {
-    let row = client.simple_query("SELECT @@VERSION;").await?.into_row().await?;
-    let version = row.map(|row| Cells::new(row).string()).unwrap_or_default();
+pub(super) async fn server_version(client: &mut ReadClient) -> Result<String> {
+    let row = client.simple_query("SELECT @@VERSION;").await?.into_iter().next();
+    let version = row.map(|row| Cells::new(row.values.into_iter()).string()).unwrap_or_default();
     Ok(version.lines().next().unwrap_or("SQL Server").trim().to_owned())
 }
 
-pub(super) async fn summon_by_id(client: &mut SqlClient, summon_id: i32) -> SqlResult<Option<SummonListItem>> {
+pub(super) async fn summon_by_id(client: &mut ReadClient, summon_id: i32) -> Result<Option<SummonListItem>> {
     let sql = format!("{SUMMON_PROJECTION} WHERE s.[id] = @P1;");
-    Ok(client.query(sql, &[&summon_id]).await?.into_row().await?.map(summon))
+    Ok(client.query(sql, &[&summon_id]).await?.into_iter().next().map(summon))
 }
 
-pub(super) async fn summons_by_card_id(client: &mut SqlClient, card_id: i32) -> SqlResult<Vec<SummonListItem>> {
+pub(super) async fn summons_by_card_id(client: &mut ReadClient, card_id: i32) -> Result<Vec<SummonListItem>> {
     let sql = format!("{SUMMON_PROJECTION} WHERE s.[card_id] = @P1 ORDER BY s.[id] ASC;");
-    let rows = client.query(sql, &[&card_id]).await?.into_first_result().await?;
+    let rows = client.query(sql, &[&card_id]).await?;
     Ok(rows.into_iter().map(summon).collect())
 }
 
-pub(super) async fn search_summons(
-    client: &mut SqlClient,
-    filter: &SummonListFilter,
-) -> SqlResult<Vec<SummonListItem>> {
+pub(super) async fn search_summons(client: &mut ReadClient, filter: &SummonListFilter) -> Result<Vec<SummonListItem>> {
     // @P1 IncludeNonForm1, @P2 IncludeRidingOnly, @P3 ShowAllEvolutions,
     // @P4 SearchText, @P5 ExactSummonId, @P6 SearchLike
+    // A match on an earlier stage also counts for the final stage of its three-stage chain.
     let sql = format!(
-        "{SUMMON_PROJECTION}
+        "WITH PreviousMatches AS (
+            SELECT COALESCE(NULLIF(next_stage.[evolve_target], 0), next_stage.[id]) AS FinalId,
+                   previous.[card_id] AS CardId,
+                   MAX(CASE WHEN previous.[id] = @P5 THEN 1 ELSE 0 END) AS ExactMatch
+            FROM [SummonResource] previous
+            INNER JOIN [SummonResource] next_stage
+                ON previous.[evolve_target] = next_stage.[id] AND previous.[card_id] = next_stage.[card_id]
+            LEFT JOIN [StringResource] previous_name ON previous.[name_id] = previous_name.[code]
+            WHERE @P3 = 0 AND @P4 <> '' AND previous.[evolve_target] <> 0
+              AND (
+                previous.[id] = @P5
+                OR CAST(previous.[id] AS nvarchar(32)) LIKE @P6
+                OR COALESCE(previous_name.[value], '') LIKE @P6
+              )
+            GROUP BY COALESCE(NULLIF(next_stage.[evolve_target], 0), next_stage.[id]), previous.[card_id]
+        )
+        {SUMMON_PROJECTION}
+        LEFT JOIN PreviousMatches pm ON pm.FinalId = s.[id] AND pm.CardId = s.[card_id]
         WHERE (@P1 = 1 OR s.[form] = 1)
           AND (@P2 = 1 OR s.[is_riding_only] = 0)
           AND (@P3 = 1 OR s.[evolve_target] = 0)
@@ -97,11 +118,12 @@ pub(super) async fn search_summons(
             @P4 = ''
             OR (@P5 IS NOT NULL AND s.[id] = @P5)
             OR CAST(s.[id] AS nvarchar(32)) LIKE @P6
-            OR ISNULL(sn.[value], '') LIKE @P6
-            OR ISNULL(cn.[value], '') LIKE @P6
+            OR COALESCE(sn.[value], '') LIKE @P6
+            OR COALESCE(cn.[value], '') LIKE @P6
+            OR pm.FinalId IS NOT NULL
           )
         ORDER BY
-            CASE WHEN @P5 IS NOT NULL AND s.[id] = @P5 THEN 0 ELSE 1 END,
+            CASE WHEN s.[id] = @P5 OR pm.ExactMatch = 1 THEN 0 ELSE 1 END,
             s.[id] ASC;"
     );
 
@@ -120,13 +142,11 @@ pub(super) async fn search_summons(
                 &like.as_str(),
             ],
         )
-        .await?
-        .into_first_result()
         .await?;
     Ok(rows.into_iter().map(summon).collect())
 }
 
-pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i32) -> SqlResult<Vec<SkillTreeEntry>> {
+pub(super) async fn skill_tree_entries(client: &mut ReadClient, skill_tree_id: i32) -> Result<Vec<SkillTreeEntry>> {
     const SQL: &str = "
         SELECT
             skill_tree_id AS SkillTreeId,
@@ -144,16 +164,17 @@ pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i3
             need_skill_lv_3 AS NeedSkillLv3,
             cenhance_min AS CEnhanceMin,
             cenhance_max AS CEnhanceMax,
-            CAST(jp_ratio AS decimal(18,6)) AS JpRatio
+            {jp_ratio} AS JpRatio
         FROM SkillTreeResource
         WHERE skill_tree_id = @P1
         ORDER BY lv ASC, skill_id ASC;";
 
-    let rows = client.query(SQL, &[&skill_tree_id]).await?.into_first_result().await?;
+    let jp_ratio = if client.is_mariadb() { "jp_ratio" } else { "1" };
+    let rows = client.query(SQL.replace("{jp_ratio}", jp_ratio), &[&skill_tree_id]).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             let mut entry = SkillTreeEntry {
                 skill_tree_id: c.i32(),
                 skill_id: c.i32(),
@@ -181,7 +202,7 @@ pub(super) async fn skill_tree_entries(client: &mut SqlClient, skill_tree_id: i3
 }
 
 /// Returns `None` when the summon does not exist.
-pub(super) async fn stat_scaling(client: &mut SqlClient, summon_id: i32) -> SqlResult<Option<StatScalingSnapshot>> {
+pub(super) async fn stat_scaling(client: &mut ReadClient, summon_id: i32) -> Result<Option<StatScalingSnapshot>> {
     const SUMMON_SQL: &str = "
         SELECT TOP 1
             s.[id] AS SummonId,
@@ -203,17 +224,17 @@ pub(super) async fn stat_scaling(client: &mut SqlClient, summon_id: i32) -> SqlR
         FROM [StatResource] sr
         WHERE sr.[id] = @P1;";
 
-    let Some(row) = client.query(SUMMON_SQL, &[&summon_id]).await?.into_row().await? else {
+    let Some(row) = client.query(SUMMON_SQL, &[&summon_id]).await?.into_iter().next() else {
         return Ok(None);
     };
-    let mut c = Cells::new(row);
+    let mut c = Cells::new(row.values.into_iter());
     let (summon_id, stat_id, evolve_type) = (c.i32(), c.i32(), c.i32());
     let depth = growth_depth(evolve_type);
     let lookup_ids: Vec<i32> = (1..=depth).map(|stage_index| summon_id - (depth - stage_index)).collect();
 
-    let base_stats = match client.query(STAT_SQL, &[&stat_id]).await?.into_row().await? {
+    let base_stats = match client.query(STAT_SQL, &[&stat_id]).await?.into_iter().next() {
         Some(row) => {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             StatBlock { id: c.i32(), values: std::array::from_fn(|_| c.i32()) }
         }
         None => StatBlock::zero(stat_id),
@@ -235,8 +256,8 @@ pub(super) async fn stat_scaling(client: &mut SqlClient, summon_id: i32) -> SqlR
         in_list(&lookup_ids)
     );
     let mut bonuses: HashMap<i32, [Decimal; STAT_COUNT]> = HashMap::new();
-    for row in client.simple_query(bonus_sql).await?.into_first_result().await? {
-        let mut c = Cells::new(row);
+    for row in client.simple_query(bonus_sql).await? {
+        let mut c = Cells::new(row.values.into_iter());
         bonuses.insert(c.i32(), std::array::from_fn(|_| c.decimal()));
     }
 
@@ -256,7 +277,7 @@ pub(super) async fn stat_scaling(client: &mut SqlClient, summon_id: i32) -> SqlR
     Ok(Some(StatScalingSnapshot { summon_id, stat_id, evolve_type, growth_depth: depth, base_stats, stage_bonuses }))
 }
 
-pub(super) async fn creature_enhance(client: &mut SqlClient) -> SqlResult<Vec<CreatureEnhance>> {
+pub(super) async fn creature_enhance(client: &mut ReadClient) -> Result<Vec<CreatureEnhance>> {
     const SQL: &str = "
         SELECT
             ce.[enhance_level] AS EnhanceLevel,
@@ -267,27 +288,27 @@ pub(super) async fn creature_enhance(client: &mut SqlClient) -> SqlResult<Vec<Cr
         FROM [CreatureEnhance] ce
         ORDER BY ce.[enhance_level] ASC;";
 
-    let rows = client.simple_query(SQL).await?.into_first_result().await?;
+    let rows = client.simple_query(SQL).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             CreatureEnhance { enhance_level: c.i32(), stat_amplify: c.decimal() }
         })
         .collect())
 }
 
 /// Returns `None` when the skill does not exist.
-pub(super) async fn skill_record(client: &mut SqlClient, skill_id: i32) -> SqlResult<Option<SkillRecord>> {
+pub(super) async fn skill_record(client: &mut ReadClient, skill_id: i32) -> Result<Option<SkillRecord>> {
     const SQL: &str = "SELECT TOP 1 * FROM SkillResource WHERE id = @P1;";
 
-    let Some(row) = client.query(SQL, &[&skill_id]).await?.into_row().await? else {
+    let Some(row) = client.query(SQL, &[&skill_id]).await?.into_iter().next() else {
         return Ok(None);
     };
-    let names: Vec<String> = row.columns().iter().map(|column| column.name().to_owned()).collect();
-    let fields = names
+    let fields = row
+        .names
         .into_iter()
-        .zip(row)
+        .zip(row.values)
         .map(|(name, cell)| {
             let (kind, value) = cell_field(&cell);
             SkillField { name, kind, value }
@@ -296,8 +317,8 @@ pub(super) async fn skill_record(client: &mut SqlClient, skill_id: i32) -> SqlRe
     Ok(Some(SkillRecord { skill_id, fields }))
 }
 
-fn skill_display_row(row: Row) -> SkillDisplay {
-    let mut c = Cells::new(row);
+fn skill_display_row(row: ReadRow) -> SkillDisplay {
+    let mut c = Cells::new(row.values.into_iter());
     SkillDisplay {
         skill_id: c.i32(),
         skill_name: c.string(),
@@ -306,7 +327,7 @@ fn skill_display_row(row: Row) -> SkillDisplay {
     }
 }
 
-pub(super) async fn skill_display(client: &mut SqlClient, skill_ids: &[i32]) -> SqlResult<HashMap<i32, SkillDisplay>> {
+pub(super) async fn skill_display(client: &mut ReadClient, skill_ids: &[i32]) -> Result<HashMap<i32, SkillDisplay>> {
     if skill_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -314,7 +335,7 @@ pub(super) async fn skill_display(client: &mut SqlClient, skill_ids: &[i32]) -> 
         "
         SELECT
             s.id AS SkillId,
-            ISNULL(name_sr.value, CONCAT('Skill ', s.id)) AS SkillName,
+            COALESCE(name_sr.value, CONCAT('Skill ', s.id)) AS SkillName,
             NULLIF(LTRIM(RTRIM(s.icon_file_name)), '') AS IconFileName,
             tip_sr.value AS TooltipMarkup
         FROM SkillResource s
@@ -323,16 +344,16 @@ pub(super) async fn skill_display(client: &mut SqlClient, skill_ids: &[i32]) -> 
         WHERE s.id IN ({});",
         in_list(skill_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows.into_iter().map(skill_display_row).map(|d| (d.skill_id, d)).collect())
 }
 
-pub(super) async fn search_skills(client: &mut SqlClient, text: &str, limit: usize) -> SqlResult<Vec<SkillDisplay>> {
+pub(super) async fn search_skills(client: &mut ReadClient, text: &str, limit: usize) -> Result<Vec<SkillDisplay>> {
     // @P1 Limit, @P2 SearchText, @P3 ExactSkillId, @P4 SearchLike
     const SQL: &str = "
         SELECT TOP (@P1)
             s.[id] AS SkillId,
-            ISNULL(name_sr.[value], CONCAT('Skill ', s.[id])) AS SkillName,
+            COALESCE(name_sr.[value], CONCAT('Skill ', s.[id])) AS SkillName,
             NULLIF(LTRIM(RTRIM(s.[icon_file_name])), '') AS IconFileName,
             tip_sr.[value] AS TooltipMarkup
         FROM [SkillResource] s
@@ -342,7 +363,7 @@ pub(super) async fn search_skills(client: &mut SqlClient, text: &str, limit: usi
             @P2 = ''
             OR (@P3 IS NOT NULL AND s.[id] = @P3)
             OR CAST(s.[id] AS nvarchar(32)) LIKE @P4
-            OR ISNULL(name_sr.[value], '') LIKE @P4
+            OR COALESCE(name_sr.[value], '') LIKE @P4
         ORDER BY
             CASE WHEN @P3 IS NOT NULL AND s.[id] = @P3 THEN 0 ELSE 1 END,
             s.[id] ASC;";
@@ -351,14 +372,14 @@ pub(super) async fn search_skills(client: &mut SqlClient, text: &str, limit: usi
     let exact_id: Option<i32> = search.parse().ok();
     let like = format!("%{search}%");
     let limit = limit.clamp(1, crate::repository::SKILL_SEARCH_LIMIT) as i32;
-    let rows = client.query(SQL, &[&limit, &search, &exact_id, &like.as_str()]).await?.into_first_result().await?;
+    let rows = client.query(SQL, &[&limit, &search, &exact_id, &like.as_str()]).await?;
     Ok(rows.into_iter().map(skill_display_row).collect())
 }
 
 pub(super) async fn random_groups(
-    client: &mut SqlClient,
+    client: &mut ReadClient,
     group_ids: &[i32],
-) -> SqlResult<HashMap<i32, RandomSkillGroup>> {
+) -> Result<HashMap<i32, RandomSkillGroup>> {
     if group_ids.is_empty() {
         return Ok(HashMap::new());
     }
@@ -386,11 +407,11 @@ pub(super) async fn random_groups(
         WHERE r.[sid] IN ({});",
         in_list(group_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             let (group_id, use_code) = (c.i32(), c.i32());
             let group = RandomSkillGroup::from_db_row(group_id, use_code, std::array::from_fn(|_| c.i32()));
             (group_id, group)
@@ -398,9 +419,9 @@ pub(super) async fn random_groups(
         .collect())
 }
 
-pub(super) async fn next_random_group_id(client: &mut SqlClient) -> SqlResult<i32> {
+pub(super) async fn next_random_group_id(client: &mut ReadClient) -> Result<i32> {
     const SQL: &str = "
-        SELECT ISNULL(MAX(v.[id]), 0) + 1
+        SELECT COALESCE(MAX(v.[id]), 0) + 1
         FROM (
             SELECT r.[sid] AS [id] FROM [SummonRandomSkillResource] r
             UNION ALL
@@ -409,11 +430,11 @@ pub(super) async fn next_random_group_id(client: &mut SqlClient) -> SqlResult<i3
             WHERE s.[skill_group_id] > 0
         ) v;";
 
-    let row = client.simple_query(SQL).await?.into_row().await?;
-    Ok(row.map(|row| Cells::new(row).i32()).unwrap_or(1).max(1))
+    let row = client.simple_query(SQL).await?.into_iter().next();
+    Ok(row.map(|row| Cells::new(row.values.into_iter()).i32()).unwrap_or(1).max(1))
 }
 
-pub(super) async fn skill_usage(client: &mut SqlClient, skill_ids: &[i32]) -> SqlResult<Vec<SkillUsage>> {
+pub(super) async fn skill_usage(client: &mut ReadClient, skill_ids: &[i32]) -> Result<Vec<SkillUsage>> {
     if skill_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -423,7 +444,7 @@ pub(super) async fn skill_usage(client: &mut SqlClient, skill_ids: &[i32]) -> Sq
             st.skill_id AS SkillId,
             st.skill_tree_id AS SkillTreeId,
             s.id AS SummonId,
-            ISNULL(sr.value, CONCAT('Summon ', s.id)) AS SummonName
+            COALESCE(sr.value, CONCAT('Summon ', s.id)) AS SummonName
         FROM SkillTreeResource st
         INNER JOIN SummonResource s
             ON st.skill_tree_id IN (s.skill_tree1_id, s.skill_tree2_id, s.skill_tree3_id, s.skill_tree4_id, s.skill_tree5_id)
@@ -432,51 +453,44 @@ pub(super) async fn skill_usage(client: &mut SqlClient, skill_ids: &[i32]) -> Sq
         ORDER BY st.skill_id, s.id;",
         in_list(skill_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             SkillUsage { skill_id: c.i32(), skill_tree_id: c.i32(), summon_id: c.i32(), summon_name: c.string() }
         })
         .collect())
 }
 
-pub(super) async fn tree_usage(client: &mut SqlClient, skill_tree_ids: &[i32]) -> SqlResult<Vec<TreeUsage>> {
+pub(super) async fn tree_usage(client: &mut ReadClient, skill_tree_ids: &[i32]) -> Result<Vec<TreeUsage>> {
     if skill_tree_ids.is_empty() {
         return Ok(Vec::new());
     }
     let sql = format!(
         "
-        SELECT s.id AS SummonId,
-               ISNULL(sr.value, CONCAT('Summon ', s.id)) AS SummonName,
-               x.skill_tree_id AS SkillTreeId,
-               x.tree_slot AS TreeSlotIndex
-        FROM SummonResource s
-        CROSS APPLY (VALUES
-            (s.skill_tree1_id, 1),
-            (s.skill_tree2_id, 2),
-            (s.skill_tree3_id, 3),
-            (s.skill_tree4_id, 4),
-            (s.skill_tree5_id, 5)
-        ) x(skill_tree_id, tree_slot)
-        LEFT JOIN StringResource sr ON s.name_id = sr.code
-        WHERE x.skill_tree_id IN ({})
-        ORDER BY x.skill_tree_id, s.id;",
+        SELECT slots.id AS SummonId,
+               COALESCE(sr.value, CONCAT('Summon ', slots.id)) AS SummonName,
+               slots.skill_tree_id AS SkillTreeId,
+               slots.slot_index AS TreeSlotIndex
+        FROM ({SUMMON_SLOTS}) slots
+        LEFT JOIN StringResource sr ON slots.name_id = sr.code
+        WHERE slots.skill_tree_id IN ({})
+        ORDER BY slots.skill_tree_id, slots.id;",
         in_list(skill_tree_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             let (summon_id, summon_name) = (c.i32(), c.string());
             TreeUsage { skill_tree_id: c.i32(), summon_id, summon_name, tree_slot: c.i32() }
         })
         .collect())
 }
 
-pub(super) async fn stat_usage(client: &mut SqlClient, stat_ids: &[i32]) -> SqlResult<Vec<StatUsage>> {
+pub(super) async fn stat_usage(client: &mut ReadClient, stat_ids: &[i32]) -> Result<Vec<StatUsage>> {
     if stat_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -485,64 +499,57 @@ pub(super) async fn stat_usage(client: &mut SqlClient, stat_ids: &[i32]) -> SqlR
         SELECT
             s.[stat_id] AS StatId,
             s.[id] AS SummonId,
-            ISNULL(sr.[value], CONCAT('Summon ', s.[id])) AS SummonName
+            COALESCE(sr.[value], CONCAT('Summon ', s.[id])) AS SummonName
         FROM [SummonResource] s
         LEFT JOIN [StringResource] sr ON s.[name_id] = sr.[code]
         WHERE s.[stat_id] IN ({})
         ORDER BY s.[stat_id], s.[id];",
         in_list(stat_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             StatUsage { stat_id: c.i32(), summon_id: c.i32(), summon_name: c.string() }
         })
         .collect())
 }
 
-pub(super) async fn level_bonus_usage(client: &mut SqlClient, bonus_ids: &[i32]) -> SqlResult<Vec<LevelBonusUsage>> {
+pub(super) async fn level_bonus_usage(client: &mut ReadClient, bonus_ids: &[i32]) -> Result<Vec<LevelBonusUsage>> {
     if bonus_ids.is_empty() {
         return Ok(Vec::new());
     }
     let sql = format!(
         "
-        SELECT
-            b.[bonus_id] AS BonusId,
-            s.[id] AS SummonId,
-            ISNULL(sr.[value], CONCAT('Summon ', s.[id])) AS SummonName,
-            b.[stage_index] AS StageIndex
-        FROM [SummonResource] s
-        CROSS APPLY (
-            SELECT CASE
-                WHEN s.[form] <= 1 THEN 1
-                WHEN s.[form] = 2 THEN 2
-                ELSE 3
-            END AS growth_depth
-        ) depth_map
-        CROSS APPLY (VALUES
-            (1, s.[id] - (depth_map.[growth_depth] - 1)),
-            (2, s.[id] - (depth_map.[growth_depth] - 2)),
-            (3, s.[id] - (depth_map.[growth_depth] - 3))
-        ) b(stage_index, bonus_id)
-        LEFT JOIN [StringResource] sr ON s.[name_id] = sr.[code]
-        WHERE b.[stage_index] <= depth_map.[growth_depth]
-          AND b.[bonus_id] IN ({})
-        ORDER BY b.[bonus_id], s.[id], b.[stage_index];",
+        SELECT b.bonus_id, b.id, COALESCE(sr.[value], CONCAT('Summon ', b.id)), b.stage_index
+        FROM (
+            SELECT depth_map.id, depth_map.name_id, stages.stage_index,
+                   depth_map.id - (depth_map.growth_depth - stages.stage_index) AS bonus_id
+            FROM (
+                SELECT id, name_id,
+                       CASE WHEN form <= 1 THEN 1 WHEN form = 2 THEN 2 ELSE 3 END AS growth_depth
+                FROM SummonResource
+            ) depth_map
+            CROSS JOIN (SELECT 1 AS stage_index UNION ALL SELECT 2 UNION ALL SELECT 3) stages
+            WHERE stages.stage_index <= depth_map.growth_depth
+        ) b
+        LEFT JOIN StringResource sr ON b.name_id = sr.code
+        WHERE b.bonus_id IN ({})
+        ORDER BY b.bonus_id, b.id, b.stage_index;",
         in_list(bonus_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             LevelBonusUsage { bonus_id: c.i32(), summon_id: c.i32(), summon_name: c.string(), stage_index: c.i32() }
         })
         .collect())
 }
 
-pub(super) async fn random_group_usage(client: &mut SqlClient, group_ids: &[i32]) -> SqlResult<Vec<RandomGroupUsage>> {
+pub(super) async fn random_group_usage(client: &mut ReadClient, group_ids: &[i32]) -> Result<Vec<RandomGroupUsage>> {
     if group_ids.is_empty() {
         return Ok(Vec::new());
     }
@@ -551,30 +558,21 @@ pub(super) async fn random_group_usage(client: &mut SqlClient, group_ids: &[i32]
         SELECT
             s.[skill_group_id] AS GroupId,
             s.[skill_tree_id] AS SkillTreeId,
-            sm.[id] AS SummonId,
-            ISNULL(sr.[value], CONCAT('Summon ', sm.[id])) AS SummonName,
-            tree_slot.[slot_index] AS TreeSlotIndex
-        FROM [SkillTreeResource] s
-        INNER JOIN [SummonResource] sm
-            ON s.[skill_tree_id] IN (sm.[skill_tree1_id], sm.[skill_tree2_id], sm.[skill_tree3_id], sm.[skill_tree4_id], sm.[skill_tree5_id])
-        CROSS APPLY (VALUES
-            (1, sm.[skill_tree1_id]),
-            (2, sm.[skill_tree2_id]),
-            (3, sm.[skill_tree3_id]),
-            (4, sm.[skill_tree4_id]),
-            (5, sm.[skill_tree5_id])
-        ) tree_slot(slot_index, tree_id)
-        LEFT JOIN [StringResource] sr ON sm.[name_id] = sr.[code]
-        WHERE s.[skill_group_id] IN ({})
-          AND tree_slot.[tree_id] = s.[skill_tree_id]
-        ORDER BY s.[skill_group_id], sm.[id], tree_slot.[slot_index];",
+            slots.id AS SummonId,
+            COALESCE(sr.[value], CONCAT('Summon ', slots.id)) AS SummonName,
+            slots.slot_index AS TreeSlotIndex
+        FROM SkillTreeResource s
+        INNER JOIN ({SUMMON_SLOTS}) slots ON slots.skill_tree_id = s.skill_tree_id
+        LEFT JOIN StringResource sr ON slots.name_id = sr.code
+        WHERE s.skill_group_id IN ({})
+        ORDER BY s.skill_group_id, slots.id, slots.slot_index;",
         in_list(group_ids)
     );
-    let rows = client.simple_query(sql).await?.into_first_result().await?;
+    let rows = client.simple_query(sql).await?;
     Ok(rows
         .into_iter()
         .map(|row| {
-            let mut c = Cells::new(row);
+            let mut c = Cells::new(row.values.into_iter());
             RandomGroupUsage {
                 group_id: c.i32(),
                 skill_tree_id: c.i32(),

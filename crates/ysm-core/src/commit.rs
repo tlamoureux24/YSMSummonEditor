@@ -99,11 +99,15 @@ pub fn tree_slot_column(slot: u8) -> Option<&'static str> {
     }
 }
 
-/// Whether a name is safe to splice into SQL as a bracketed identifier.
+/// Whether a name is safe to splice into SQL as a quoted identifier.
 pub fn is_sql_identifier(name: &str) -> bool {
     let mut chars = name.chars();
     matches!(chars.next(), Some(c) if c.is_ascii_alphabetic() || c == '_')
         && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+pub fn is_updatable_skill_column(change: &FieldChange) -> bool {
+    is_sql_identifier(&change.name) && !change.name.eq_ignore_ascii_case("id") && change.kind.is_editable()
 }
 
 #[cfg(test)]

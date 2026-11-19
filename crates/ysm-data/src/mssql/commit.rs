@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use rust_decimal::Decimal;
 use tiberius::Query;
-use ysm_core::commit::{CommitRequest, CommitResult, FieldChange, is_sql_identifier, tree_slot_column};
+use ysm_core::commit::{CommitRequest, CommitResult, FieldChange, is_updatable_skill_column, tree_slot_column};
 use ysm_core::model::{STAT_COUNT, SkillTreeEntry, StatBlock};
 use ysm_core::value::{FieldKind, FieldValue};
 
@@ -183,13 +183,9 @@ async fn apply(client: &mut SqlClient, request: &CommitRequest) -> SqlResult<Com
     Ok(result)
 }
 
-pub(super) fn is_updatable_skill_column(change: &FieldChange) -> bool {
-    is_sql_identifier(&change.name) && !change.name.eq_ignore_ascii_case("id") && change.kind.is_editable()
-}
-
 async fn scalar_i32(client: &mut SqlClient, sql: &'static str) -> SqlResult<i32> {
     let row = client.simple_query(sql).await?.into_row().await?;
-    Ok(row.map(|row| Cells::new(row).i32()).unwrap_or(1))
+    Ok(row.map(|row| Cells::new(row.into_iter()).i32()).unwrap_or(1))
 }
 
 async fn insert_tree_entry(client: &mut SqlClient, tree_id: i32, e: &SkillTreeEntry) -> SqlResult<()> {
@@ -197,11 +193,11 @@ async fn insert_tree_entry(client: &mut SqlClient, tree_id: i32, e: &SkillTreeEn
         INSERT INTO SkillTreeResource
         (skill_tree_id, skill_id, skill_group_id, min_skill_lv, max_skill_lv, lv, job_lv,
          need_skill_id_1, need_skill_lv_1, need_skill_id_2, need_skill_lv_2,
-         need_skill_id_3, need_skill_lv_3, cenhance_min, cenhance_max, jp_ratio)
+         need_skill_id_3, need_skill_lv_3, cenhance_min, cenhance_max)
         VALUES
         (@P1, @P2, @P3, @P4, @P5, @P6, @P7,
          @P8, @P9, @P10, @P11,
-         @P12, @P13, @P14, @P15, @P16);";
+         @P12, @P13, @P14, @P15);";
 
     let mut query = Query::new(SQL);
     for value in [
@@ -223,7 +219,6 @@ async fn insert_tree_entry(client: &mut SqlClient, tree_id: i32, e: &SkillTreeEn
     ] {
         query.bind(value);
     }
-    query.bind(e.jp_ratio);
     query.execute(client).await?;
     Ok(())
 }

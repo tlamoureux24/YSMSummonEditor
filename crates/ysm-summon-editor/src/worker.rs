@@ -27,8 +27,8 @@ use ysm_core::session::{ChainBundle, TreeRef};
 use ysm_core::value::SkillRecord;
 use ysm_data::repository::SKILL_SEARCH_LIMIT;
 use ysm_data::{
-    AssetIndex, DataError, DbProvider, DbSettings, InMemoryRepository, MssqlRepository, PgRepository, SummonRepository,
-    loader,
+    AssetIndex, DataError, DatabaseEngine, DbSettings, InMemoryRepository, PgRepository, SqlRepository,
+    SummonRepository, loader,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -86,7 +86,7 @@ impl From<DataError> for Failure {
 pub type Outcome<T> = Result<T, Failure>;
 
 pub enum Command {
-    /// Switch to the MSSQL database described by the settings and verify it.
+    /// Switch to the database described by the settings and verify it.
     Connect(DbSettings),
     /// Switch to the built-in demo data.
     UseDemo,
@@ -112,6 +112,7 @@ pub enum Command {
     },
     LoadScaling {
         summon_id: i32,
+        earlier_ids: Vec<i32>,
     },
     SearchSkills {
         text: String,
@@ -191,11 +192,17 @@ pub enum Event {
     SkillDisplayLoaded(Outcome<Vec<SkillDisplay>>),
     RandomGroupsLoaded { requested: Vec<i32>, result: Outcome<Vec<RandomSkillGroup>> },
     SkillRecordLoaded { skill_id: i32, result: Outcome<SkillRecord> },
-    ScalingLoaded(Outcome<(StatScalingSnapshot, Vec<CreatureEnhance>)>),
+    ScalingLoaded(Outcome<ScalingData>),
     SkillsFound { generation: u64, result: Outcome<Vec<SkillDisplay>> },
     NextRandomGroupId { tree: TreeRef, uid: u64, result: Outcome<i32> },
     SaveAnalyzed(Outcome<UsageReport>),
     Committed(Outcome<CommitResult>),
+}
+
+pub struct ScalingData {
+    pub current: StatScalingSnapshot,
+    pub earlier: Vec<StatScalingSnapshot>,
+    pub enhance: Vec<CreatureEnhance>,
 }
 
 impl Event {
@@ -303,9 +310,9 @@ enum Source {
 
 /// A repository for the configured server; no connection is opened yet.
 fn open_repository(settings: &DbSettings) -> ysm_data::Result<Box<dyn SummonRepository>> {
-    Ok(match settings.provider {
-        DbProvider::Mssql => Box::new(MssqlRepository::new(settings.clone())?),
-        DbProvider::PostgreSql => Box::new(PgRepository::new(settings.clone())?),
+    Ok(match settings.engine {
+        DatabaseEngine::SqlServer | DatabaseEngine::MariaDb => Box::new(SqlRepository::new(settings.clone())?),
+        DatabaseEngine::PostgreSql => Box::new(PgRepository::new(settings.clone())?),
     })
 }
 
@@ -398,9 +405,11 @@ impl Worker {
                 skill_id: *skill_id,
                 result: self.with_repository(|r| r.skill_record(*skill_id)),
             },
-            Command::LoadScaling { summon_id } => {
-                Event::ScalingLoaded(self.with_repository(|r| Ok((r.stat_scaling(*summon_id)?, r.creature_enhance()?))))
-            }
+            Command::LoadScaling { summon_id, earlier_ids } => Event::ScalingLoaded(self.with_repository(|repo| {
+                let current = repo.stat_scaling(*summon_id)?;
+                let earlier = earlier_ids.iter().map(|id| repo.stat_scaling(*id)).collect::<ysm_data::Result<_>>()?;
+                Ok(ScalingData { current, earlier, enhance: repo.creature_enhance()? })
+            })),
             Command::SearchSkills { text, generation } => Event::SkillsFound {
                 generation: *generation,
                 result: self.with_repository(|r| r.search_skills(text, SKILL_SEARCH_LIMIT)),
@@ -576,7 +585,7 @@ mod tests {
             Command::LoadSkillDisplay { ids: vec![1] },
             Command::LoadRandomGroups { ids: vec![2] },
             Command::LoadSkillRecord { skill_id: 3 },
-            Command::LoadScaling { summon_id: 4 },
+            Command::LoadScaling { summon_id: 4, earlier_ids: vec![2, 3] },
             Command::SearchSkills { text: String::new(), generation: 5 },
             Command::NextRandomGroupId { tree, uid: 6 },
             Command::AnalyzeSave { request: CommitRequest::default(), session_tree_ids: vec![] },

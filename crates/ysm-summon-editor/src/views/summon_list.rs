@@ -42,8 +42,7 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     // Right to left: the filter button takes its fixed width and the search box the rest.
     let row = Vec2::new(ui.available_width(), theme::CONTROL_HEIGHT);
     ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-        let filter_active = state.filter.include_riding_only || state.filter.final_only;
-        let tint = if filter_active { color::ACCENT_BRIGHT } else { color::TEXT };
+        let tint = if state.include_riding_only { color::ACCENT_BRIGHT } else { color::TEXT };
         let icon = RichText::new(icons::FILTER).size(theme::GLYPH_SIZE).color(tint);
         let filter = egui::Button::new(icon).min_size(Vec2::splat(theme::CONTROL_HEIGHT));
         let keep_open =
@@ -53,9 +52,7 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
             .config(keep_open)
             .ui(ui, |ui| {
                 ui.set_min_width(220.0);
-                let mut changed = ui.checkbox(&mut state.filter.final_only, "Final evolutions only").changed();
-                changed |= ui.checkbox(&mut state.filter.include_riding_only, "Include riding-only summons").changed();
-                if changed {
+                if ui.checkbox(&mut state.include_riding_only, "Include riding-only summons").changed() {
                     actions.push(Action::Search);
                 }
             })
@@ -87,7 +84,9 @@ fn count_row(ui: &mut Ui, state: &AppState) {
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
             ui.label(widgets::caption("Loading summons…"));
         } else {
-            ui.label(widgets::caption(format!("{} summons", state.summons.len())));
+            let count = state.summons.len();
+            let item = if count == 1 { "summon" } else { "summons" };
+            ui.label(widgets::caption(format!("{count} {item}")));
         }
     });
 }

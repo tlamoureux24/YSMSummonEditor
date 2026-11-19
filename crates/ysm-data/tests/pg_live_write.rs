@@ -22,7 +22,7 @@ use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::sql_script::{SqlDialect, render_script};
 use ysm_core::value::{FieldKind, FieldValue};
 use ysm_data::env_local::parse_connection_string_for;
-use ysm_data::{DataError, DbProvider, PgRepository, SummonRepository, loader};
+use ysm_data::{DataError, DatabaseEngine, PgRepository, SummonRepository, loader};
 
 fn save(repo: &mut PgRepository, request: &CommitRequest) {
     repo.commit(request).expect("save");
@@ -40,7 +40,7 @@ fn reload(repo: &mut PgRepository, summon_id: i32) -> SummonListItem {
 #[ignore = "changes a live PostgreSQL database"]
 fn every_kind_of_save_round_trips() {
     let connection = std::env::var("YSM_PG_WRITE_TEST_CONNECTION").expect("set YSM_PG_WRITE_TEST_CONNECTION");
-    let settings = parse_connection_string_for(DbProvider::PostgreSql, &connection).expect("connection string");
+    let settings = parse_connection_string_for(DatabaseEngine::PostgreSql, &connection).expect("connection string");
     let mut repo = PgRepository::new(settings).unwrap();
     println!("server: {}", repo.test_connection().unwrap());
 
@@ -95,7 +95,12 @@ fn every_kind_of_save_round_trips() {
     assert_eq!(repo.skill_tree_entries(original_tree).unwrap(), before_original);
     let clone_rows = repo.skill_tree_entries(cloned_id).unwrap();
     assert_eq!(clone_rows.len(), before_original.len());
-    assert!(clone_rows.iter().zip(&before_original).all(|(c, o)| SkillTreeEntry { skill_tree_id: o.skill_tree_id, ..*c } == *o));
+    assert!(
+        clone_rows
+            .iter()
+            .zip(&before_original)
+            .all(|(c, o)| SkillTreeEntry { skill_tree_id: o.skill_tree_id, ..*c } == *o)
+    );
 
     // 3. Stats: stage 1 updated in place, stage 3 cloned.
     let base1 = repo.stat_scaling(s1.summon_id).unwrap().base_stats;
@@ -106,7 +111,12 @@ fn every_kind_of_save_round_trips() {
         &mut repo,
         &CommitRequest {
             stats: vec![
-                StatCommit { summon_id: s1.summon_id, original_stat_id: base1.id, stats: raised, clone_if_shared: false },
+                StatCommit {
+                    summon_id: s1.summon_id,
+                    original_stat_id: base1.id,
+                    stats: raised,
+                    clone_if_shared: false,
+                },
                 StatCommit {
                     summon_id: s3.summon_id,
                     original_stat_id: base3.id,
@@ -148,8 +158,14 @@ fn every_kind_of_save_round_trips() {
     // 5. Random group created, then edited.
     let group_id = repo.next_random_group_id().unwrap();
     let skills: Vec<i32> = rows.iter().map(|e| e.skill_id).filter(|id| *id > 0).take(3).collect();
-    save(&mut repo, &CommitRequest { random_groups: vec![RandomSkillGroup::new(group_id, [skills[0]])], ..Default::default() });
-    save(&mut repo, &CommitRequest { random_groups: vec![RandomSkillGroup::new(group_id, skills.clone())], ..Default::default() });
+    save(
+        &mut repo,
+        &CommitRequest { random_groups: vec![RandomSkillGroup::new(group_id, [skills[0]])], ..Default::default() },
+    );
+    save(
+        &mut repo,
+        &CommitRequest { random_groups: vec![RandomSkillGroup::new(group_id, skills.clone())], ..Default::default() },
+    );
     let group = repo.random_groups(&[group_id]).unwrap().remove(&group_id).expect("group stored");
     assert_eq!(group.use_code(), RandomSkillGroup::new(group_id, skills.clone()).use_code());
     assert_eq!(repo.next_random_group_id().unwrap(), group_id + 1);
@@ -177,8 +193,14 @@ fn every_kind_of_save_round_trips() {
         seen.push(field.kind);
         changes.push(FieldChange { name: field.name.clone(), kind: field.kind, old: field.value.clone(), new });
     }
-    println!("skill {skill_id}: {:?}", changes.iter().map(|c| format!("{} {}", c.name, c.kind.label())).collect::<Vec<_>>());
-    save(&mut repo, &CommitRequest { skills: vec![SkillUpdate { skill_id, changes: changes.clone() }], ..Default::default() });
+    println!(
+        "skill {skill_id}: {:?}",
+        changes.iter().map(|c| format!("{} {}", c.name, c.kind.label())).collect::<Vec<_>>()
+    );
+    save(
+        &mut repo,
+        &CommitRequest { skills: vec![SkillUpdate { skill_id, changes: changes.clone() }], ..Default::default() },
+    );
     let after = repo.skill_record(skill_id).unwrap();
     for change in &changes {
         assert_eq!(after.field(&change.name).unwrap().value, change.new, "{}", change.name);
