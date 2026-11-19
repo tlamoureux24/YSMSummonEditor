@@ -1,5 +1,7 @@
 //! Rich rendering of the game's tooltip markup.
 
+use std::borrow::Cow;
+
 use eframe::egui::text::{LayoutJob, TextFormat};
 use eframe::egui::{self, Color32, FontFamily, FontId, RichText, Stroke, Ui};
 use ysm_core::model::SkillDisplay;
@@ -12,6 +14,40 @@ use ysm_core::i18n::{tr, trf};
 
 const TOOLTIP_WIDTH: f32 = 460.0;
 const BODY_SIZE: f32 = 13.0;
+
+/// Removes formatting tags from a skill name while retaining literal annotations.
+pub fn plain_skill_name(name: &str) -> Cow<'_, str> {
+    if !name.contains('<') {
+        return Cow::Borrowed(name);
+    }
+
+    let mut plain = String::with_capacity(name.len());
+    let mut remaining = name;
+    while let Some((prefix, tail)) = remaining.split_once('<') {
+        let Some((token, rest)) = tail.split_once('>') else {
+            break;
+        };
+        plain.push_str(prefix);
+        let tag = token.trim().to_ascii_lowercase();
+        let color_tag = tag.strip_prefix('/').unwrap_or(&tag);
+        let is_color = color_tag.starts_with('#') && tooltip::parse_hex_color(color_tag).is_some();
+        let is_size = tag
+            .strip_prefix("size:")
+            .or_else(|| tag.strip_prefix("size="))
+            .and_then(|value| value.trim().parse::<f32>().ok())
+            .is_some_and(|size| size.is_finite() && size > 0.0);
+        if matches!(tag.as_str(), "br" | "br/" | "/br") {
+            plain.push(' ');
+        } else if !(is_color || is_size || matches!(tag.as_str(), "b" | "/b" | "i" | "/i" | "u" | "/u" | "/size")) {
+            plain.push('<');
+            plain.push_str(token);
+            plain.push('>');
+        }
+        remaining = rest;
+    }
+    plain.push_str(remaining);
+    Cow::Owned(plain.trim().to_owned())
+}
 
 /// Lays out game markup with its colours, weights and sizes.
 pub fn layout(markup: &str, wrap_width: f32) -> LayoutJob {
@@ -43,7 +79,7 @@ pub fn skill(ui: &mut Ui, skill_id: i32, display: Option<&SkillDisplay>) {
     ui.set_max_width(TOOLTIP_WIDTH);
     let name = display.map_or_else(|| trf("Skill {}", &[&skill_id]), |d| d.skill_name.clone());
     ui.horizontal(|ui| {
-        ui.label(RichText::new(name).font(theme::bold(theme::BODY_SIZE)));
+        ui.label(RichText::new(plain_skill_name(&name)).font(theme::bold(theme::BODY_SIZE)));
         ui.label(RichText::new(format!("#{skill_id}")).color(color::text_muted()));
     });
 
@@ -87,8 +123,22 @@ fn candidates(ui: &mut Ui, session: &EditSession, group: &RandomSkillGroup) {
     egui::Grid::new(("group-candidates", group.group_id)).num_columns(2).spacing([10.0, 2.0]).show(ui, |ui| {
         for skill_id in group.skill_ids() {
             ui.label(RichText::new(skill_id.to_string()).color(color::text_muted()));
-            ui.label(session.skill_name(*skill_id));
+            ui.label(plain_skill_name(&session.skill_name(*skill_id)));
             ui.end_row();
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn skill_names_keep_annotations_and_remove_formatting() {
+        assert_eq!(
+            plain_skill_name("<size:9><B>Hit</B></size> <Physical><BR><#FFA010>Mastery</#FFA010>"),
+            "Hit <Physical> Mastery"
+        );
+        assert_eq!(plain_skill_name("<size=12>Hit</size> <> 5 < 6"), "Hit <> 5 < 6");
+    }
 }

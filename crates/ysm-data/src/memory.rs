@@ -154,6 +154,23 @@ impl SummonRepository for InMemoryRepository {
     fn search_summons(&mut self, filter: &SummonListFilter) -> Result<Vec<SummonListItem>> {
         let search = filter.search_text.trim().to_lowercase();
         let exact_id: Option<i32> = search.parse().ok();
+        let matches_id_or_name = |summon: &SummonListItem| {
+            Some(summon.summon_id) == exact_id
+                || summon.summon_id.to_string().contains(&search)
+                || contains_ignore_case(&summon.summon_name, &search)
+        };
+        let mut previous_matches = HashMap::new();
+        if !filter.show_all_evolutions && !search.is_empty() {
+            for previous in self.summons.values().filter(|s| s.evolve_target != 0 && matches_id_or_name(s)) {
+                let Some(next) = self.summons.get(&previous.evolve_target).filter(|s| s.card_id == previous.card_id)
+                else {
+                    continue;
+                };
+                let final_id = if next.evolve_target == 0 { next.summon_id } else { next.evolve_target };
+                *previous_matches.entry((final_id, previous.card_id)).or_insert(false) |=
+                    Some(previous.summon_id) == exact_id;
+            }
+        }
 
         let mut found: Vec<SummonListItem> = self
             .summons
@@ -163,13 +180,16 @@ impl SummonRepository for InMemoryRepository {
             .filter(|s| filter.show_all_evolutions || s.evolve_target == 0)
             .filter(|s| {
                 search.is_empty()
-                    || s.summon_id.to_string().contains(&search)
-                    || contains_ignore_case(&s.summon_name, &search)
+                    || matches_id_or_name(s)
                     || s.card_name.as_deref().is_some_and(|card| contains_ignore_case(card, &search))
+                    || previous_matches.contains_key(&(s.summon_id, s.card_id))
             })
             .cloned()
             .collect();
-        found.sort_by_key(|s| (Some(s.summon_id) != exact_id, s.summon_id));
+        found.sort_by_key(|s| {
+            let exact = Some(s.summon_id) == exact_id || previous_matches.get(&(s.summon_id, s.card_id)) == Some(&true);
+            (!exact, s.summon_id)
+        });
         Ok(found)
     }
 
@@ -638,6 +658,24 @@ impl InMemoryRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn final_only_search_finds_and_ranks_the_chain_from_an_earlier_stage() {
+        let mut repo = InMemoryRepository::demo();
+        let filter = |search: &str| SummonListFilter {
+            show_all_evolutions: false,
+            search_text: search.to_owned(),
+            ..Default::default()
+        };
+        let by_id = repo.search_summons(&filter("1011")).unwrap();
+        assert_eq!(by_id[0].summon_id, 1013);
+        let earlier_name = repo.summon_by_id(1012).unwrap().unwrap().summon_name;
+        let by_name = repo.search_summons(&filter(&earlier_name)).unwrap();
+        assert!(by_name.iter().any(|summon| summon.summon_id == 1013));
+        let all = repo.search_summons(&filter("")).unwrap();
+        assert!(all.iter().all(|summon| summon.evolve_target == 0));
+        assert!(all.iter().any(|summon| summon.form == 1));
+    }
     use ysm_core::commit::{FieldChange, LevelBonusUpsert, SkillUpdate, StatCommit, TreeCommit};
 
     fn tree_commit(repo: &mut InMemoryRepository, summon_id: i32, slot: u8, clone: bool) -> TreeCommit {

@@ -1,20 +1,139 @@
 //! Summon stat scaling calculator.
 //!
-//! A summon's stat is its base value plus a growth bonus per evolution stage.
-//! Each stage contributes `coefficient × effective stage level × stage
-//! multiplier`, truncated; levels past the stage threshold count triple. The
-//! creature enhance amplifier is applied to the final sum.
+//! Model the AurumisRZ server's current-form growth and the original editor's
+//! cumulative growth calculation.
 
 use std::collections::BTreeMap;
 
-use rust_decimal::Decimal;
 use rust_decimal::prelude::ToPrimitive;
+use rust_decimal::{Decimal, RoundingStrategy};
 
 use crate::model::{STAT_COUNT, Stat, StatScalingSnapshot};
 
 pub const MIN_LEVEL: i32 = 1;
 pub const MAX_LEVEL: i32 = 350;
 pub const MAX_ENHANCE_STAGE: i32 = 5;
+pub const TUNING_LEVELS: [i32; 2] = [150, 200];
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GrowthModel {
+    Legacy,
+    Aurumis,
+}
+
+impl GrowthModel {
+    pub fn max_level(self) -> i32 {
+        match self {
+            Self::Legacy => MAX_LEVEL,
+            Self::Aurumis => 200,
+        }
+    }
+
+    pub fn stage3_gain(self, coefficient: Decimal) -> i32 {
+        let [start, end] = TUNING_LEVELS;
+        self.bonus_at(coefficient, 3, end).saturating_sub(self.bonus_at(coefficient, 3, start))
+    }
+
+    fn bonus_at(self, coefficient: Decimal, stage: i32, level: i32) -> i32 {
+        let factor = self.level_factor(stage, level);
+        match self {
+            Self::Legacy => truncate(coefficient * factor),
+            Self::Aurumis => (coefficient.to_f32().unwrap_or(0.0) * factor.to_f32().unwrap_or(0.0)) as i32,
+        }
+    }
+
+    fn level_factor(self, stage: i32, level: i32) -> Decimal {
+        let config = &STAGE_CONFIGS[(stage - 1) as usize];
+        match self {
+            Self::Legacy => {
+                let elapsed = (level - config.offset).clamp(0, config.max_level);
+                let normal = elapsed.min(config.threshold);
+                let over = (elapsed - config.threshold).max(0);
+                Decimal::from(normal + over * 3) * (Decimal::ONE + Decimal::new(i64::from(stage - 1) * 25, 2))
+            }
+            // GetSummonLevelBonus applies the current form's row and counts
+            // the evolution level itself for forms 2 and 3.
+            Self::Aurumis => Decimal::from(if stage == 1 { level } else { (level + 1 - config.offset).max(0) }),
+        }
+    }
+
+    pub fn calculate(self, input: &ScalingInput<'_>) -> ScalingResult {
+        calculate_with_model(input, self)
+    }
+
+    pub fn growth_curve(
+        self,
+        snapshot: &StatScalingSnapshot,
+        enhance_amplify: &BTreeMap<i32, Decimal>,
+        enhance_stage: i32,
+    ) -> Vec<[i32; STAT_COUNT]> {
+        (MIN_LEVEL..=self.max_level())
+            .map(|level| {
+                final_values(self.calculate(&ScalingInput { level, enhance_stage, enhance_amplify, snapshot }))
+            })
+            .collect()
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Stage3Preset {
+    Light,
+    Balanced,
+    High,
+}
+
+impl Stage3Preset {
+    pub const ALL: [Self; 3] = [Self::Light, Self::Balanced, Self::High];
+
+    fn rate(self) -> Decimal {
+        Decimal::new(
+            match self {
+                Self::Light => 6,
+                Self::Balanced => 10,
+                Self::High => 14,
+            },
+            2,
+        )
+    }
+}
+
+/// Proposes coefficients for unconfigured Stage 3 stats. Earlier forms'
+/// strongest positive growth adds weight to their established strengths.
+pub fn suggest_stage3(
+    snapshot: &StatScalingSnapshot,
+    model: GrowthModel,
+    preset: Stage3Preset,
+) -> Option<[Decimal; STAT_COUNT]> {
+    if snapshot.evolve_type != 3 {
+        return None;
+    }
+    let current = snapshot.stage_bonuses.iter().find(|stage| stage.stage_index == 3)?.values;
+    let [start, end] = TUNING_LEVELS;
+    let factor = model.level_factor(3, end) - model.level_factor(3, start);
+    let proposed = std::array::from_fn(|index| {
+        if !current[index].is_zero() {
+            return current[index];
+        }
+        let prior_rate = snapshot
+            .stage_bonuses
+            .iter()
+            .filter(|stage| matches!(stage.stage_index, 1 | 2))
+            .map(|stage| stage.values[index])
+            .max()
+            .unwrap_or_default()
+            .max(Decimal::ZERO)
+            .min(Decimal::from(10));
+        let base = Decimal::from(snapshot.base_stats.values[index].max(0));
+        let reference = base + prior_rate * Decimal::from(end - start);
+        if reference.is_zero() {
+            return Decimal::ZERO;
+        }
+        let target = (reference * preset.rate()).clamp(Decimal::ONE, Decimal::from(50));
+        // MariaDB stores CreatureLevelBonus with two decimal places.
+        (target / factor).round_dp_with_strategy(2, RoundingStrategy::MidpointAwayFromZero)
+    });
+    (proposed != current).then_some(proposed)
+}
 
 struct StageConfig {
     /// Summon level at which this growth stage starts.
@@ -29,6 +148,62 @@ const STAGE_CONFIGS: [StageConfig; 3] = [
     StageConfig { offset: 50, threshold: 50, max_level: 65 },
     StageConfig { offset: 100, threshold: 200, max_level: 200 },
 ];
+
+/// First level eligible for each growth stage of the summon.
+pub fn growth_stage_start_levels(growth_depth: i32) -> impl Iterator<Item = i32> {
+    STAGE_CONFIGS.iter().take(growth_depth.clamp(1, STAGE_CONFIGS.len() as i32) as usize).map(|stage| stage.offset + 1)
+}
+
+pub fn aurumis_evolution_level(stage: i32) -> i32 {
+    STAGE_CONFIGS[(stage.clamp(1, 3) - 1) as usize].offset.max(MIN_LEVEL)
+}
+
+/// Evaluates the form available at this level, with evolution at the first eligible level.
+/// The forms are ordered from earliest to latest.
+pub fn aurumis_progression_at(
+    forms: &[StatScalingSnapshot],
+    level: i32,
+    enhance_amplify: &BTreeMap<i32, Decimal>,
+    enhance_stage: i32,
+) -> Option<(i32, ScalingResult)> {
+    let form_at = |level| {
+        forms.iter().rev().find(|form| level >= aurumis_evolution_level(form.growth_depth)).or_else(|| forms.first())
+    };
+    let form = form_at(level)?;
+    let calculate = |snapshot, level| {
+        GrowthModel::Aurumis.calculate(&ScalingInput { level, enhance_stage, enhance_amplify, snapshot })
+    };
+    let mut current = calculate(form, level);
+    let effective_level = current.effective_level;
+    if effective_level > MIN_LEVEL
+        && let Some(previous) = form_at(effective_level - 1)
+        && !std::ptr::eq(form, previous)
+    {
+        for (row, previous) in current.rows.iter_mut().zip(calculate(previous, effective_level - 1).rows) {
+            row.delta = row.final_value.saturating_sub(previous.final_value);
+        }
+    }
+    Some((form.growth_depth, current))
+}
+
+pub fn aurumis_progression_curve(
+    forms: &[StatScalingSnapshot],
+    enhance_amplify: &BTreeMap<i32, Decimal>,
+    enhance_stage: i32,
+) -> Vec<[i32; STAT_COUNT]> {
+    (MIN_LEVEL..=GrowthModel::Aurumis.max_level())
+        .filter_map(|level| aurumis_progression_at(forms, level, enhance_amplify, enhance_stage))
+        .map(|(_, result)| final_values(result))
+        .collect()
+}
+
+fn final_values(result: ScalingResult) -> [i32; STAT_COUNT] {
+    let mut values = [0; STAT_COUNT];
+    for row in result.rows {
+        values[row.stat.index()] = row.final_value;
+    }
+    values
+}
 
 pub struct ScalingInput<'a> {
     pub level: i32,
@@ -63,8 +238,12 @@ pub struct ScalingResult {
 }
 
 pub fn calculate(input: &ScalingInput<'_>) -> ScalingResult {
+    GrowthModel::Legacy.calculate(input)
+}
+
+fn calculate_with_model(input: &ScalingInput<'_>, model: GrowthModel) -> ScalingResult {
     let snapshot = input.snapshot;
-    let level = input.level.clamp(MIN_LEVEL, MAX_LEVEL);
+    let level = input.level.clamp(MIN_LEVEL, model.max_level());
     let previous_level = (level - 1).max(0);
     let enhance_stage = input.enhance_stage.clamp(0, MAX_ENHANCE_STAGE);
     let stat_amplify = input.enhance_amplify.get(&enhance_stage).copied().unwrap_or(Decimal::ZERO);
@@ -77,6 +256,9 @@ pub fn calculate(input: &ScalingInput<'_>) -> ScalingResult {
             let mut stage = [0; 3];
             let mut stage_previous = [0; 3];
             for stage_index in 1..=growth_depth {
+                if model == GrowthModel::Aurumis && stage_index != growth_depth {
+                    continue;
+                }
                 let slot = (stage_index - 1) as usize;
                 let coefficient = snapshot
                     .stage_bonuses
@@ -84,18 +266,32 @@ pub fn calculate(input: &ScalingInput<'_>) -> ScalingResult {
                     .find(|b| b.stage_index == stage_index)
                     .map(|b| b.get(stat))
                     .unwrap_or(Decimal::ZERO);
-                stage[slot] = stage_bonus(coefficient, stage_index, level);
-                stage_previous[slot] = stage_bonus(coefficient, stage_index, previous_level);
+                stage[slot] = model.bonus_at(coefficient, stage_index, level);
+                stage_previous[slot] = model.bonus_at(coefficient, stage_index, previous_level);
             }
 
             let base = snapshot.base_stats.get(stat);
             let bonus: i32 = stage.iter().sum();
             let bonus_previous: i32 = stage_previous.iter().sum();
             let final_raw = base + bonus;
-            let final_value = amplify(final_raw, multiplier);
-            let final_previous = amplify(base + bonus_previous, multiplier);
+            let (final_value, final_previous) = match model {
+                GrowthModel::Legacy => (amplify(final_raw, multiplier), amplify(base + bonus_previous, multiplier)),
+                GrowthModel::Aurumis => {
+                    let factor = 1.0 + stat_amplify.to_f32().unwrap_or(0.0);
+                    let enhanced_base = (base as f32 * factor) as i32;
+                    (enhanced_base.saturating_add(bonus), enhanced_base.saturating_add(bonus_previous))
+                }
+            };
 
-            ScalingRow { stat, base, stage, bonus, final_raw, final_value, delta: final_value - final_previous }
+            ScalingRow {
+                stat,
+                base,
+                stage,
+                bonus,
+                final_raw,
+                final_value,
+                delta: final_value.saturating_sub(final_previous),
+            }
         })
         .collect();
 
@@ -115,30 +311,7 @@ pub fn growth_curve(
     enhance_amplify: &BTreeMap<i32, Decimal>,
     enhance_stage: i32,
 ) -> Vec<[i32; STAT_COUNT]> {
-    (MIN_LEVEL..=MAX_LEVEL)
-        .map(|level| {
-            let result = calculate(&ScalingInput { level, enhance_stage, enhance_amplify, snapshot });
-            let mut values = [0; STAT_COUNT];
-            for row in result.rows {
-                values[row.stat.index()] = row.final_value;
-            }
-            values
-        })
-        .collect()
-}
-
-fn stage_bonus(coefficient: Decimal, stage_index: i32, level: i32) -> i32 {
-    let config = &STAGE_CONFIGS[(stage_index - 1) as usize];
-    let stage_level = (level - config.offset).clamp(0, config.max_level);
-    if stage_level <= 0 || coefficient.is_zero() {
-        return 0;
-    }
-
-    let normal_levels = stage_level.min(config.threshold);
-    let over_levels = (stage_level - config.threshold).max(0);
-    let effective_level = Decimal::from(normal_levels + over_levels * 3);
-    let stage_multiplier = Decimal::ONE + Decimal::from(stage_index - 1) * Decimal::new(25, 2);
-    truncate(coefficient * effective_level * stage_multiplier)
+    GrowthModel::Legacy.growth_curve(snapshot, enhance_amplify, enhance_stage)
 }
 
 fn amplify(value: i32, multiplier: Decimal) -> i32 {
@@ -266,5 +439,54 @@ mod tests {
 
         assert_eq!(curve.len(), MAX_LEVEL as usize);
         assert!(curve.windows(2).all(|pair| pair[1][0] >= pair[0][0]));
+    }
+
+    #[test]
+    fn aurumis_uses_current_form_rate_and_enhances_base_only() {
+        let snap = snapshot(3, 100, &[(1, "1"), (2, "2"), (3, "0.50")]);
+        let enhance = BTreeMap::from([(5, dec("0.1"))]);
+        let at = |level| {
+            GrowthModel::Aurumis
+                .calculate(&ScalingInput { level, enhance_stage: 5, enhance_amplify: &enhance, snapshot: &snap })
+                .rows
+                .remove(0)
+        };
+        assert_eq!(at(99).stage, [0, 0, 0]);
+        assert_eq!(at(150).stage, [0, 0, 25]);
+        assert_eq!(at(150).final_value, 135);
+        assert_eq!(at(200).final_value, 160);
+        assert_eq!(at(350), at(200));
+    }
+
+    #[test]
+    fn aurumis_progression_uses_each_forms_base_and_shows_both_evolution_jumps() {
+        let forms =
+            [snapshot(1, 25, &[(1, "0.50")]), snapshot(2, 60, &[(2, "0.50")]), snapshot(3, 110, &[(3, "0.30")])];
+        let curve = aurumis_progression_curve(&forms, &no_amplify(), 0);
+        let strength = |level: usize| curve[level - 1][Stat::Str.index()];
+        assert_eq!(strength(49), 49);
+        assert_eq!(strength(50), 60);
+        assert_eq!(strength(99), 85);
+        assert_eq!(strength(100), 110);
+        assert_eq!(strength(200), 140);
+        let (form, result) = aurumis_progression_at(&forms, 100, &no_amplify(), 0).unwrap();
+        assert_eq!(form, 3);
+        assert_eq!(result.rows[Stat::Str.index()].delta, 25);
+    }
+
+    #[test]
+    fn stage3_presets_are_ordered_bounded_and_preserve_configured_coefficients() {
+        let mut snap = snapshot(3, 149, &[(1, "0.23"), (2, "0.20"), (3, "0")]);
+        snap.stage_bonuses[2].values[Stat::Vit.index()] = dec("0.44");
+        snap.base_stats.values[Stat::Dex.index()] = 6000;
+        let [light, balanced, high] =
+            Stage3Preset::ALL.map(|preset| suggest_stage3(&snap, GrowthModel::Aurumis, preset).unwrap());
+        assert!(light[0] < balanced[0] && balanced[0] < high[0]);
+        assert_eq!(balanced[Stat::Vit.index()], dec("0.44"));
+        assert_eq!(balanced[Stat::Luk.index()], Decimal::ZERO);
+        assert_eq!(GrowthModel::Aurumis.stage3_gain(high[Stat::Dex.index()]), 50);
+        assert!(GrowthModel::Aurumis.stage3_gain(balanced[0]) >= 14);
+        snap.evolve_type = 2;
+        assert!(suggest_stage3(&snap, GrowthModel::Aurumis, Stage3Preset::Balanced).is_none());
     }
 }

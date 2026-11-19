@@ -94,10 +94,18 @@ pub struct EffectiveRow {
     pub min_skill_lv: i32,
     pub max_skill_lv: i32,
     pub is_dirty: bool,
-    /// Distinct random groups of the merged rows, ascending.
-    pub group_ids: Vec<i32>,
+    /// Distinct random groups of the merged rows, ascending by group ID.
+    pub groups: Vec<EffectiveGroup>,
     /// Number of tree rows merged into this one.
     pub linked: usize,
+}
+
+/// A random group and one source row that links to it in this evolution.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct EffectiveGroup {
+    pub group_id: i32,
+    pub tree: TreeRef,
+    pub uid: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -8,7 +8,7 @@
 
 mod tree;
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::commit::{CommitRequest, SkillUpdate, TreeCommit};
 use crate::i18n::trf;
@@ -18,7 +18,7 @@ use crate::model::{
 use crate::random_group::RandomSkillGroup;
 use crate::scaling_edit::{LevelBonusEdit, ScalingEditResult, StatEdit};
 
-pub use tree::{EffectiveRow, EntryRow, StageState, TreeChange, TreeChangeKind, TreeRef, TreeState};
+pub use tree::{EffectiveGroup, EffectiveRow, EntryRow, StageState, TreeChange, TreeChangeKind, TreeRef, TreeState};
 
 /// How many undo steps are kept.
 const UNDO_LIMIT: usize = 200;
@@ -409,7 +409,11 @@ impl EditSession {
     }
 
     fn stage_rows(&self, stage: u8) -> impl Iterator<Item = &EntryRow> {
-        self.stages.iter().filter(move |s| s.stage == stage).flat_map(|s| &s.trees).flat_map(|t| &t.rows)
+        self.stage_trees(stage).flat_map(|t| &t.rows)
+    }
+
+    fn stage_trees(&self, stage: u8) -> impl Iterator<Item = &TreeState> {
+        self.stages.iter().filter(move |s| s.stage == stage).flat_map(|s| &s.trees)
     }
 
     fn stage_trees_mut(&mut self, stage: u8) -> impl Iterator<Item = &mut TreeState> {
@@ -571,8 +575,9 @@ impl EditSession {
 
     /// Skills of a stage merged across its trees, ordered by skill ID then level.
     pub fn effective_rows(&self, stage: u8) -> Vec<EffectiveRow> {
-        let mut merged: BTreeMap<(i32, i32), (EffectiveRow, BTreeSet<i32>)> = BTreeMap::new();
-        for row in self.stage_rows(stage).filter(|r| r.entry.skill_id > 0) {
+        let mut merged = BTreeMap::new();
+        let rows = self.stage_trees(stage).flat_map(|tree| tree.rows.iter().map(|row| (tree.tree, row)));
+        for (tree, row) in rows.filter(|(_, row)| row.entry.skill_id > 0) {
             let entry = &row.entry;
             let (effective, groups) = merged.entry((entry.skill_id, entry.lv)).or_insert_with(|| {
                 (
@@ -582,10 +587,10 @@ impl EditSession {
                         min_skill_lv: entry.min_skill_lv,
                         max_skill_lv: entry.max_skill_lv,
                         is_dirty: false,
-                        group_ids: Vec::new(),
+                        groups: Vec::new(),
                         linked: 0,
                     },
-                    BTreeSet::new(),
+                    BTreeMap::new(),
                 )
             });
             effective.min_skill_lv = effective.min_skill_lv.min(entry.min_skill_lv);
@@ -593,13 +598,14 @@ impl EditSession {
             effective.is_dirty |= row.is_dirty();
             effective.linked += 1;
             if entry.skill_group_id > 0 {
-                groups.insert(entry.skill_group_id);
+                let group_id = entry.skill_group_id;
+                groups.entry(group_id).or_insert(EffectiveGroup { group_id, tree, uid: row.uid });
             }
         }
         merged
             .into_values()
             .map(|(mut effective, groups)| {
-                effective.group_ids = groups.into_iter().collect();
+                effective.groups = groups.into_values().collect();
                 effective
             })
             .collect()
@@ -860,7 +866,7 @@ mod tests {
         let rows = session.effective_rows(3);
 
         assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].group_ids, [7]);
+        assert_eq!(rows[0].groups, [EffectiveGroup { group_id: 7, tree: T31, uid: first_uid(&session, T31) }]);
     }
 
     #[test]

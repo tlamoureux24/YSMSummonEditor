@@ -10,52 +10,44 @@ use crate::Result;
 
 const APP_FOLDER: &str = "YSMSummonEditor";
 const SETTINGS_FILE: &str = "settings.json";
-/// Default MSSQL port.
 pub const DEFAULT_PORT: i32 = 1433;
-/// Default PostgreSQL port.
-pub const DEFAULT_POSTGRES_PORT: i32 = 5432;
 
-/// The database server the editor talks to.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, Serialize, Deserialize)]
-pub enum DbProvider {
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum DatabaseEngine {
     #[default]
-    #[serde(rename = "MSSQL")]
-    Mssql,
+    SqlServer,
+    #[serde(rename = "MariaDB")]
+    MariaDb,
     #[serde(rename = "PostgreSQL")]
     PostgreSql,
 }
 
-impl DbProvider {
-    pub const ALL: [DbProvider; 2] = [DbProvider::Mssql, DbProvider::PostgreSql];
-
-    pub fn default_port(self) -> i32 {
-        match self {
-            DbProvider::Mssql => DEFAULT_PORT,
-            DbProvider::PostgreSql => DEFAULT_POSTGRES_PORT,
-        }
-    }
+impl DatabaseEngine {
+    pub const ALL: [DatabaseEngine; 3] = [Self::SqlServer, Self::MariaDb, Self::PostgreSql];
 
     pub fn label(self) -> &'static str {
         match self {
-            DbProvider::Mssql => "MSSQL",
-            DbProvider::PostgreSql => "PostgreSQL",
+            Self::SqlServer => "SQL Server",
+            Self::MariaDb => "MariaDB",
+            Self::PostgreSql => "PostgreSQL",
         }
     }
 
-    /// Parses the value of `YSM_DB_PROVIDER`.
-    pub fn parse(text: &str) -> Option<DbProvider> {
-        match text.trim().to_ascii_lowercase().as_str() {
-            "mssql" | "sqlserver" | "sql server" => Some(DbProvider::Mssql),
-            "postgresql" | "postgres" | "pgsql" | "pg" => Some(DbProvider::PostgreSql),
-            _ => None,
-        }
-    }
-
-    /// Flavour of the `.sql` export.
-    pub fn sql_dialect(self) -> ysm_core::sql_script::SqlDialect {
+    pub fn default_port(self) -> u16 {
         match self {
-            DbProvider::Mssql => ysm_core::sql_script::SqlDialect::TSql,
-            DbProvider::PostgreSql => ysm_core::sql_script::SqlDialect::PostgreSql,
+            Self::SqlServer => DEFAULT_PORT as u16,
+            Self::MariaDb => 3306,
+            Self::PostgreSql => 5432,
+        }
+    }
+
+    /// Parses the value of `YSM_DB_PROVIDER` in `.env.local`.
+    pub fn parse(text: &str) -> Option<DatabaseEngine> {
+        match text.trim().to_ascii_lowercase().as_str() {
+            "mssql" | "sqlserver" | "sql server" => Some(Self::SqlServer),
+            "mariadb" | "mysql" => Some(Self::MariaDb),
+            "postgresql" | "postgres" | "pgsql" | "pg" => Some(Self::PostgreSql),
+            _ => None,
         }
     }
 }
@@ -63,9 +55,9 @@ impl DbProvider {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "PascalCase", default)]
 pub struct DbSettings {
-    /// Missing in files written before PostgreSQL support: MSSQL.
-    pub provider: DbProvider,
+    pub engine: DatabaseEngine,
     pub server: String,
+    #[serde(default)]
     pub port: i32,
     pub database: String,
     pub user_id: String,
@@ -76,7 +68,7 @@ pub struct DbSettings {
 impl Default for DbSettings {
     fn default() -> Self {
         Self {
-            provider: DbProvider::Mssql,
+            engine: DatabaseEngine::default(),
             server: String::new(),
             port: DEFAULT_PORT,
             database: String::new(),
@@ -92,14 +84,14 @@ impl DbSettings {
         !self.server.trim().is_empty() && !self.database.trim().is_empty() && !self.user_id.trim().is_empty()
     }
 
-    /// Empty settings for a provider, with its default port.
-    pub fn for_provider(provider: DbProvider) -> Self {
-        Self { provider, port: provider.default_port(), ..Self::default() }
+    /// Empty settings for an engine, with its default port.
+    pub fn for_engine(engine: DatabaseEngine) -> Self {
+        Self { engine, port: i32::from(engine.default_port()), ..Self::default() }
     }
 
-    /// The configured port, or the provider's default when it is out of range.
+    /// The configured port, or the default when it is out of range.
     pub fn effective_port(&self) -> u16 {
-        u16::try_from(self.port).ok().filter(|p| *p > 0).unwrap_or(self.provider.default_port() as u16)
+        u16::try_from(self.port).ok().filter(|p| *p > 0).unwrap_or_else(|| self.engine.default_port())
     }
 
     /// `server,port / database`, without credentials.
@@ -171,7 +163,7 @@ impl SettingsStore {
         let mut settings: AppSettings = serde_json::from_str(json.trim_start_matches('\u{feff}'))
             .map_err(|error| crate::DataError::Invalid(format!("settings file is not valid: {error}")))?;
         if settings.database.port <= 0 {
-            settings.database.port = settings.database.provider.default_port();
+            settings.database.port = i32::from(settings.database.engine.default_port());
         }
         Ok(settings)
     }
@@ -247,31 +239,6 @@ mod tests {
         assert!(settings.include_non_form1_by_default);
         assert!(settings.save_to_sql_mode);
         assert!(settings.database.is_configured());
-        assert_eq!(settings.database.provider, DbProvider::Mssql, "files without Provider stay on MSSQL");
-    }
-
-    #[test]
-    fn postgres_provider_round_trips_with_its_default_port() {
-        let path = temp_file("postgres");
-        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
-        std::fs::write(&path, r#"{ "Database": { "Provider": "PostgreSQL", "Server": "h", "Port": 0 } }"#).unwrap();
-        let store = SettingsStore::new(&path);
-        let settings = store.load().unwrap();
-        assert_eq!(settings.database.provider, DbProvider::PostgreSql);
-        assert_eq!(settings.database.port, DEFAULT_POSTGRES_PORT);
-
-        store.save(&settings).unwrap();
-        assert!(std::fs::read_to_string(&path).unwrap().contains("\"Provider\": \"PostgreSQL\""));
-        assert_eq!(store.load().unwrap(), settings);
-        assert_eq!(DbSettings { port: -1, ..DbSettings::for_provider(DbProvider::PostgreSql) }.effective_port(), 5432);
-    }
-
-    #[test]
-    fn provider_names_are_parsed_loosely() {
-        assert_eq!(DbProvider::parse(" PostgreSQL "), Some(DbProvider::PostgreSql));
-        assert_eq!(DbProvider::parse("postgres"), Some(DbProvider::PostgreSql));
-        assert_eq!(DbProvider::parse("MSSQL"), Some(DbProvider::Mssql));
-        assert_eq!(DbProvider::parse("oracle"), None);
     }
 
     #[test]
@@ -313,6 +280,34 @@ mod tests {
         std::fs::create_dir_all(path.parent().unwrap()).unwrap();
         std::fs::write(&path, "{ not json").unwrap();
         assert!(SettingsStore::new(&path).load().is_err());
+    }
+
+    #[test]
+    fn postgres_engine_round_trips_with_its_default_port() {
+        let path = temp_file("postgres");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, r#"{ "Database": { "Engine": "PostgreSQL", "Server": "h", "Port": 0 } }"#).unwrap();
+        let store = SettingsStore::new(&path);
+        let settings = store.load().unwrap();
+        assert_eq!(settings.database.engine, DatabaseEngine::PostgreSql);
+        assert_eq!(settings.database.port, 5432);
+
+        store.save(&settings).unwrap();
+        assert!(std::fs::read_to_string(&path).unwrap().contains("\"Engine\": \"PostgreSQL\""));
+        assert_eq!(store.load().unwrap(), settings);
+        assert_eq!(
+            DbSettings { port: -1, ..DbSettings::for_engine(DatabaseEngine::PostgreSql) }.effective_port(),
+            5432
+        );
+    }
+
+    #[test]
+    fn engine_names_are_parsed_loosely() {
+        assert_eq!(DatabaseEngine::parse(" PostgreSQL "), Some(DatabaseEngine::PostgreSql));
+        assert_eq!(DatabaseEngine::parse("postgres"), Some(DatabaseEngine::PostgreSql));
+        assert_eq!(DatabaseEngine::parse("MSSQL"), Some(DatabaseEngine::SqlServer));
+        assert_eq!(DatabaseEngine::parse("MariaDB"), Some(DatabaseEngine::MariaDb));
+        assert_eq!(DatabaseEngine::parse("oracle"), None);
     }
 
     #[test]

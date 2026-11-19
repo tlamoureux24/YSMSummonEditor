@@ -1,4 +1,4 @@
-//! MSSQL implementation of [`SummonRepository`] on top of tiberius.
+//! SQL Server and MariaDB implementations of [`SummonRepository`].
 //!
 //! The repository owns a single-threaded tokio runtime and one lazily opened
 //! connection, so its blocking methods can be called from a plain worker
@@ -7,6 +7,10 @@
 mod cells;
 mod commit;
 mod queries;
+mod read;
+
+#[cfg(test)]
+mod mariadb_tests;
 
 use std::collections::HashMap;
 use std::time::{Duration, Instant};
@@ -15,7 +19,7 @@ use tiberius::{AuthMethod, Client, Config, EncryptionLevel};
 use tokio::net::TcpStream;
 use tokio::runtime::Runtime;
 use tokio_util::compat::{Compat, TokioAsyncWriteCompatExt};
-use ysm_core::commit::{CommitRequest, CommitResult, tree_slot_column};
+use ysm_core::commit::{CommitRequest, CommitResult, is_updatable_skill_column, tree_slot_column};
 use ysm_core::model::{
     CreatureEnhance, LevelBonusUsage, RandomGroupUsage, SkillDisplay, SkillTreeEntry, SkillUsage, StatScalingSnapshot,
     StatUsage, SummonListFilter, SummonListItem, TreeUsage,
@@ -23,9 +27,10 @@ use ysm_core::model::{
 use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::value::SkillRecord;
 
-use ysm_core::i18n::{Language, trf};
+use self::read::{ReadClient, connect_mariadb, mariadb_error};
+use ysm_core::i18n::Language;
 
-use crate::settings::DbSettings;
+use crate::settings::{DatabaseEngine, DbSettings};
 use crate::{DataError, Result, SummonRepository};
 
 type SqlClient = Client<Compat<TcpStream>>;
@@ -49,19 +54,21 @@ impl Default for Timeouts {
     }
 }
 
-pub struct MssqlRepository {
+pub struct SqlRepository {
     runtime: Runtime,
     settings: DbSettings,
     timeouts: Timeouts,
-    client: Option<SqlClient>,
+    client: Option<ReadClient>,
     last_used: Instant,
     /// Language of the game texts (names, tooltips).
     language: Language,
-    /// The table holding them, chosen once per connection.
-    texts: Option<String>,
+    /// Whether they come from `StringResource_EN`; known once per connection.
+    english_texts: Option<bool>,
 }
 
-impl MssqlRepository {
+pub type MssqlRepository = SqlRepository;
+
+impl SqlRepository {
     /// Creates the repository. No connection is opened until the first query.
     pub fn new(settings: DbSettings) -> Result<Self> {
         Self::with_timeouts(settings, Timeouts::default())
@@ -79,17 +86,17 @@ impl MssqlRepository {
             client: None,
             last_used: Instant::now(),
             language: Language::default(),
-            texts: None,
+            english_texts: None,
         })
     }
 
     /// Runs one database operation, opening the connection first when needed.
-    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut SqlClient, &str) -> SqlResult<T>) -> Result<T> {
-        let Self { runtime, settings, timeouts, client, last_used, language, texts } = self;
+    fn run<T>(&mut self, operation: impl AsyncFnOnce(&mut ReadClient) -> Result<T>) -> Result<T> {
+        let Self { runtime, settings, timeouts, client, last_used, language, english_texts } = self;
         runtime.block_on(async {
             if let Some(existing) = client.as_mut()
                 && last_used.elapsed() > IDLE_CHECK_AFTER
-                && !is_alive(existing).await
+                && !existing.is_alive().await
             {
                 *client = None;
             }
@@ -97,47 +104,38 @@ impl MssqlRepository {
             let connection = match client {
                 Some(connection) => connection,
                 None => {
-                    *texts = None;
-                    client.insert(connect(settings, *timeouts).await?)
+                    let connection = match settings.engine {
+                        DatabaseEngine::SqlServer => {
+                            ReadClient::SqlServer(Box::new(connect(settings, *timeouts).await?), timeouts.command)
+                        }
+                        DatabaseEngine::MariaDb => ReadClient::MariaDb(Box::new(connect_mariadb(settings, *timeouts)?)),
+                        DatabaseEngine::PostgreSql => {
+                            return Err(DataError::Invalid("PostgreSQL is served by PgRepository".into()));
+                        }
+                    };
+                    *english_texts = None;
+                    client.insert(connection)
                 }
             };
-            let outcome = async {
-                let table = match texts.as_ref() {
-                    Some(table) => table.clone(),
-                    None => texts.insert(text_table(connection, *language).await?).clone(),
-                };
-                operation(connection, &table).await
-            }
-            .await;
+            let english = match *english_texts {
+                Some(english) => english,
+                None => {
+                    let english = *language == Language::English && has_english_texts(connection).await?;
+                    *english_texts = Some(english);
+                    english
+                }
+            };
+            let outcome = read::with_english_texts(english, operation(connection)).await;
             *last_used = Instant::now();
 
-            outcome.map_err(|error| {
-                let failure = classify(&error, timeouts.command);
+            outcome.inspect_err(|failure| {
                 // Errors reported by the server leave the connection usable. After anything
                 // else it is out of sync with the server and must not be reused.
                 if failure.is_connection_problem() {
                     *client = None;
                 }
-                failure
             })
         })
-    }
-}
-
-/// `StringResource`, or `StringResource_EN` for English when the database has it.
-async fn text_table(client: &mut SqlClient, language: Language) -> SqlResult<String> {
-    let english = language == Language::English && {
-        let sql = "SELECT CASE WHEN OBJECT_ID(N'StringResource_EN') IS NULL THEN 0 ELSE 1 END;";
-        let row = client.simple_query(sql).await?.into_row().await?;
-        row.is_some_and(|row| cells::Cells::new(row).i32() == 1)
-    };
-    Ok(if english { "StringResource_EN" } else { "StringResource" }.to_owned())
-}
-
-async fn is_alive(client: &mut SqlClient) -> bool {
-    match client.simple_query("SELECT 1;").await {
-        Ok(stream) => stream.into_results().await.is_ok(),
-        Err(_) => false,
     }
 }
 
@@ -147,7 +145,7 @@ fn classify(error: &tiberius::error::Error, command_timeout: Duration) -> DataEr
     match error {
         Error::Server(_) => DataError::Query(describe(error)),
         Error::Io { kind: std::io::ErrorKind::TimedOut, .. } => {
-            DataError::Timeout(trf("no response within {} s; the connection was closed", &[&command_timeout.as_secs()]))
+            DataError::Timeout(format!("no response within {} s; the connection was closed", command_timeout.as_secs()))
         }
         _ => DataError::Connection(describe(error)),
     }
@@ -171,13 +169,13 @@ async fn connect(settings: &DbSettings, timeouts: Timeouts) -> Result<SqlClient>
     let address = config.get_addr();
     let tcp = tokio::time::timeout(timeouts.connect, TcpStream::connect(&address))
         .await
-        .map_err(|_| DataError::Connection(trf("timed out connecting to {}", &[&address])))?
+        .map_err(|_| DataError::Connection(format!("timed out connecting to {address}")))?
         .map_err(|error| DataError::Connection(format!("{address}: {error}")))?;
     tcp.set_nodelay(true).map_err(|error| DataError::Connection(error.to_string()))?;
 
     tokio::time::timeout(timeouts.connect, Client::connect(config, tcp.compat_write()))
         .await
-        .map_err(|_| DataError::Connection(trf("timed out logging in to {}", &[&address])))?
+        .map_err(|_| DataError::Connection(format!("timed out logging in to {address}")))?
         .map_err(|error| DataError::Connection(describe(&error)))
 }
 
@@ -211,45 +209,57 @@ fn validate(request: &CommitRequest) -> Result<()> {
     }
 }
 
-impl SummonRepository for MssqlRepository {
+/// Whether the database has the `StringResource_EN` table.
+async fn has_english_texts(client: &mut ReadClient) -> Result<bool> {
+    let sql = if client.is_mariadb() {
+        "SELECT COUNT(*) FROM information_schema.tables \
+         WHERE table_schema = DATABASE() AND table_name = 'StringResource_EN'"
+    } else {
+        "SELECT CASE WHEN OBJECT_ID(N'StringResource_EN') IS NULL THEN 0 ELSE 1 END"
+    };
+    let rows = client.simple_query(sql).await?;
+    Ok(rows.first().and_then(|row| row.values.first()).and_then(cells::cell_i32).unwrap_or(0) > 0)
+}
+
+impl SummonRepository for SqlRepository {
     fn set_text_language(&mut self, language: Language) {
         if language != self.language {
             self.language = language;
-            self.texts = None;
+            self.english_texts = None;
         }
     }
 
     fn test_connection(&mut self) -> Result<String> {
-        self.run(async |c, _| queries::server_version(c).await)
+        self.run(async |c| queries::server_version(c).await)
     }
 
     fn summon_by_id(&mut self, summon_id: i32) -> Result<Option<SummonListItem>> {
-        self.run(async |c, t| queries::summon_by_id(c, t, summon_id).await)
+        self.run(async |c| queries::summon_by_id(c, summon_id).await)
     }
 
     fn summons_by_card_id(&mut self, card_id: i32) -> Result<Vec<SummonListItem>> {
-        self.run(async |c, t| queries::summons_by_card_id(c, t, card_id).await)
+        self.run(async |c| queries::summons_by_card_id(c, card_id).await)
     }
 
     fn search_summons(&mut self, filter: &SummonListFilter) -> Result<Vec<SummonListItem>> {
-        self.run(async |c, t| queries::search_summons(c, t, filter).await)
+        self.run(async |c| queries::search_summons(c, filter).await)
     }
 
     fn skill_tree_entries(&mut self, skill_tree_id: i32) -> Result<Vec<SkillTreeEntry>> {
-        self.run(async |c, _| queries::skill_tree_entries(c, skill_tree_id).await)
+        self.run(async |c| queries::skill_tree_entries(c, skill_tree_id).await)
     }
 
     fn stat_scaling(&mut self, summon_id: i32) -> Result<StatScalingSnapshot> {
-        self.run(async |c, _| queries::stat_scaling(c, summon_id).await)?
+        self.run(async |c| queries::stat_scaling(c, summon_id).await)?
             .ok_or_else(|| DataError::NotFound(format!("Summon {summon_id}")))
     }
 
     fn creature_enhance(&mut self) -> Result<Vec<CreatureEnhance>> {
-        self.run(async |c, _| queries::creature_enhance(c).await)
+        self.run(async |c| queries::creature_enhance(c).await)
     }
 
     fn skill_record(&mut self, skill_id: i32) -> Result<SkillRecord> {
-        self.run(async |c, _| queries::skill_record(c, skill_id).await)?
+        self.run(async |c| queries::skill_record(c, skill_id).await)?
             .ok_or_else(|| DataError::NotFound(format!("Skill {skill_id}")))
     }
 
@@ -257,62 +267,81 @@ impl SummonRepository for MssqlRepository {
         if skill_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.run(async |c, t| queries::skill_display(c, t, skill_ids).await)
+        self.run(async |c| queries::skill_display(c, skill_ids).await)
     }
 
     fn search_skills(&mut self, text: &str, limit: usize) -> Result<Vec<SkillDisplay>> {
-        self.run(async |c, t| queries::search_skills(c, t, text, limit).await)
+        self.run(async |c| queries::search_skills(c, text, limit).await)
     }
 
     fn random_groups(&mut self, group_ids: &[i32]) -> Result<HashMap<i32, RandomSkillGroup>> {
         if group_ids.is_empty() {
             return Ok(HashMap::new());
         }
-        self.run(async |c, _| queries::random_groups(c, group_ids).await)
+        self.run(async |c| queries::random_groups(c, group_ids).await)
     }
 
     fn next_random_group_id(&mut self) -> Result<i32> {
-        self.run(async |c, _| queries::next_random_group_id(c).await)
+        self.run(async |c| queries::next_random_group_id(c).await)
     }
 
     fn skill_usage(&mut self, skill_ids: &[i32]) -> Result<Vec<SkillUsage>> {
         if skill_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c, t| queries::skill_usage(c, t, skill_ids).await)
+        self.run(async |c| queries::skill_usage(c, skill_ids).await)
     }
 
     fn tree_usage(&mut self, skill_tree_ids: &[i32]) -> Result<Vec<TreeUsage>> {
         if skill_tree_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c, t| queries::tree_usage(c, t, skill_tree_ids).await)
+        self.run(async |c| queries::tree_usage(c, skill_tree_ids).await)
     }
 
     fn stat_usage(&mut self, stat_ids: &[i32]) -> Result<Vec<StatUsage>> {
         if stat_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c, t| queries::stat_usage(c, t, stat_ids).await)
+        self.run(async |c| queries::stat_usage(c, stat_ids).await)
     }
 
     fn level_bonus_usage(&mut self, bonus_ids: &[i32]) -> Result<Vec<LevelBonusUsage>> {
         if bonus_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c, t| queries::level_bonus_usage(c, t, bonus_ids).await)
+        self.run(async |c| queries::level_bonus_usage(c, bonus_ids).await)
     }
 
     fn random_group_usage(&mut self, group_ids: &[i32]) -> Result<Vec<RandomGroupUsage>> {
         if group_ids.is_empty() {
             return Ok(Vec::new());
         }
-        self.run(async |c, t| queries::random_group_usage(c, t, group_ids).await)
+        self.run(async |c| queries::random_group_usage(c, group_ids).await)
     }
 
     fn commit(&mut self, request: &CommitRequest) -> Result<CommitResult> {
+        use mysql::prelude::Queryable;
+
         validate(request)?;
-        self.run(async |c, _| commit::commit(c, request).await)
+        self.run(async |client| match client {
+            ReadClient::SqlServer(client, timeout) => {
+                commit::commit(client, request).await.map_err(|error| classify(&error, *timeout))
+            }
+            ReadClient::MariaDb(client) => {
+                let sql = ysm_core::sql_script::mariadb_batch(request);
+                client.query_drop(sql).map_err(mariadb_error)?;
+                Ok(CommitResult {
+                    updated_trees: request.trees.len(),
+                    updated_skills: request
+                        .skills
+                        .iter()
+                        .filter(|skill| skill.changes.iter().any(is_updatable_skill_column))
+                        .count(),
+                    updated_random_groups: request.random_groups.iter().filter(|group| group.group_id > 0).count(),
+                })
+            }
+        })
     }
 }
 

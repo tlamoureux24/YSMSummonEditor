@@ -1,28 +1,22 @@
 //! Editor for the candidate skills of a random group.
-//!
-//! Two lists of equal size sit either side of a narrow column of buttons:
-//! every skill on the left, the group's candidates on the right. Both
-//! columns have the same rows above their list, so the lists line up.
 
 use std::collections::HashMap;
 
-use eframe::egui::{self, RichText, Ui, Vec2};
+use eframe::egui::{self, Ui};
 use ysm_core::model::SkillDisplay;
 use ysm_core::random_group::{MAX_GROUP_SKILLS, RandomSkillGroup};
-use ysm_core::session::{EditSession, TreeRef};
+use ysm_core::session::{EditSession, GroupState, TreeRef};
 
 use super::DialogContext;
-use super::skill_search::{SearchInteraction, SkillSearch, skill_list, skill_row};
+use super::skill_search::{SearchInteraction, SkillSearch, skill_list, skill_row_with_action};
 use crate::action::Action;
 use crate::icons;
-use crate::theme::{self, color, space};
+use crate::theme::{color, space};
 use crate::widgets::{self, modal};
-use crate::worker::Event;
+use crate::worker::{Command, Event};
 use ysm_core::i18n::{tr, trf};
 
 const LIST_HEIGHT: f32 = 384.0;
-/// Width of the column holding the Add / Remove / Clear buttons.
-const BUTTON_COLUMN_WIDTH: f32 = 112.0;
 
 pub struct RandomGroupDialog {
     tree: TreeRef,
@@ -32,11 +26,10 @@ pub struct RandomGroupDialog {
     original: Vec<i32>,
     /// Candidate skill IDs, kept sorted and distinct.
     members: Vec<i32>,
-    selected_member: Option<i32>,
-    /// Display data of skills seen in search results, so members keep their names.
+    /// Skills added from search keep their names before the session loads them.
     known: HashMap<i32, SkillDisplay>,
     search: SkillSearch,
-    status: String,
+    load_error: Option<String>,
 }
 
 impl RandomGroupDialog {
@@ -49,16 +42,17 @@ impl RandomGroupDialog {
             is_new,
             original: group.skill_ids().to_vec(),
             members: group.skill_ids().to_vec(),
-            selected_member: None,
             known: HashMap::new(),
             search: SkillSearch::new(),
-            status: String::new(),
+            load_error: None,
         }
     }
 
     pub fn on_event(&mut self, event: &Event) {
-        if let Event::SkillsFound { result: Ok(found), .. } = event {
-            self.known.extend(found.iter().map(|skill| (skill.skill_id, skill.clone())));
+        if let Event::RandomGroupsLoaded { requested, result: Err(error) } = event
+            && requested.contains(&self.group_id)
+        {
+            self.load_error = Some(error.message.clone());
         }
         self.search.on_event(event);
     }
@@ -76,82 +70,64 @@ impl RandomGroupDialog {
         self.is_new || self.members != self.original
     }
 
-    fn add(&mut self, skill: &SkillDisplay) {
-        if self.members.contains(&skill.skill_id) {
-            self.status = trf("Skill {} is already in the group.", &[&skill.skill_id]);
-        } else if self.members.len() >= MAX_GROUP_SKILLS {
-            self.status = trf("A random group can hold at most {} skills.", &[&MAX_GROUP_SKILLS]);
-        } else {
-            self.known.insert(skill.skill_id, skill.clone());
-            self.members.push(skill.skill_id);
-            self.members.sort_unstable();
-            self.status = trf("Added skill {}.", &[&skill.skill_id]);
+    fn add(&mut self, skill: SkillDisplay) {
+        if self.members.len() < MAX_GROUP_SKILLS
+            && let Err(index) = self.members.binary_search(&skill.skill_id)
+        {
+            self.members.insert(index, skill.skill_id);
+            self.known.insert(skill.skill_id, skill);
         }
-    }
-
-    fn remove(&mut self, skill_id: i32) {
-        self.members.retain(|id| *id != skill_id);
-        if self.selected_member == Some(skill_id) {
-            self.selected_member = None;
-        }
-        self.status = trf("Removed skill {}.", &[&skill_id]);
     }
 
     pub fn show(&mut self, ctx: &egui::Context, id: egui::Id, env: &mut DialogContext<'_>) -> bool {
+        let group_state = env.session.group_state(self.group_id);
+        let loading = !self.is_new && group_state == GroupState::Loading;
+        if !self.is_dirty()
+            && let Some(group) = env.session.overlay_group(self.group_id)
+            && self.original != group.skill_ids()
+        {
+            self.original = group.skill_ids().to_vec();
+            self.members.clone_from(&self.original);
+        }
         let title = if self.is_new {
-            trf("New Random Group · RND[{}]", &[&self.group_id])
+            trf("New Random Group #{}", &[&self.group_id])
         } else {
-            trf("Random Group · RND[{}]", &[&self.group_id])
+            trf("Random Group #{}", &[&self.group_id])
         };
         let mut apply = false;
         let mut cancelled = false;
 
-        let outcome = modal::show(ctx, id, icons::RANDOM_GROUP, color::accent_bright(), &title, 912.0, |ui| {
-            ui.label(widgets::muted(
-                "A tree row with this group grants one random skill out of the candidates. \
-                 Candidates are kept sorted by skill ID, and UseCode always equals their number.",
-            ));
-            ui.add_space(space::SM);
-
-            let gap = space::LG;
-            let list_width = ((ui.available_width() - BUTTON_COLUMN_WIDTH - 2.0 * gap) / 2.0).floor();
-            ui.horizontal_top(|ui| {
-                ui.spacing_mut().item_spacing.x = gap;
-                ui.vertical(|ui| {
-                    ui.set_width(list_width);
-                    self.all_skills_column(ui, env);
-                });
-                ui.allocate_ui_with_layout(
-                    Vec2::new(BUTTON_COLUMN_WIDTH, 0.0),
-                    egui::Layout::top_down(egui::Align::Center),
-                    |ui| {
-                        ui.set_width(BUTTON_COLUMN_WIDTH);
-                        self.button_column(ui);
-                    },
-                );
-                ui.vertical(|ui| {
-                    ui.set_width(list_width);
-                    self.candidates_column(ui, env);
-                });
-            });
+        let outcome = modal::show(ctx, id, icons::RANDOM_GROUP, color::accent_bright(), &title, 848.0, |ui| {
+            if loading {
+                if let Some(error) = &self.load_error {
+                    ui.label(widgets::muted(tr("Could not load group candidates.")).color(color::danger()))
+                        .on_hover_text(error);
+                } else {
+                    ui.label(widgets::muted(tr("Loading group candidates…")));
+                }
+                if widgets::button(ui, icons::REFRESH, tr("Reload Group")).clicked() {
+                    self.load_error = None;
+                    env.actions.push(Action::Command(Command::LoadRandomGroups { ids: vec![self.group_id] }));
+                }
+            } else {
+                self.editor(ui, env, group_state);
+            }
 
             modal::footer(ui, |ui| {
                 if widgets::button(ui, icons::CLOSE, tr("Cancel")).clicked() {
                     cancelled = true;
                 }
-                if widgets::primary_button_enabled(ui, self.is_dirty(), icons::CHECK, tr("Apply")).clicked() {
+                if !loading
+                    && widgets::primary_button_enabled(ui, self.is_dirty(), icons::CHECK, tr("Apply Group")).clicked()
+                {
                     apply = true;
                 }
-                ui.with_layout(egui::Layout::left_to_right(egui::Align::Center), |ui| {
-                    ui.label(widgets::caption(self.status.as_str()));
-                });
             });
         });
 
         if apply {
             env.actions.push(Action::ApplyRandomGroup {
-                tree: self.tree,
-                uid: self.uid,
+                attach_to: self.is_new.then_some((self.tree, self.uid)),
                 group: RandomSkillGroup::new(self.group_id, self.members.iter().copied()),
             });
             return false;
@@ -161,79 +137,61 @@ impl RandomGroupDialog {
         !(cancelled || escaped)
     }
 
-    /// Left column: title row, search box, result list.
-    fn all_skills_column(&mut self, ui: &mut Ui, env: &mut DialogContext<'_>) {
-        widgets::control_row(
-            ui,
-            |ui| {
-                widgets::section_title(ui, tr("All skills"));
-            },
-            |ui| self.search.status(ui),
-        );
-        let members = self.members.clone();
-        let interaction = self.search.show(ui, env, LIST_HEIGHT, |skill_id| members.contains(&skill_id));
-        if let SearchInteraction::Activated(skill) = interaction {
-            self.add(&skill);
+    fn editor(&mut self, ui: &mut Ui, env: &mut DialogContext<'_>, group_state: GroupState) {
+        if !self.is_new && group_state == GroupState::MissingInDb {
+            modal::note(
+                ui,
+                icons::WARNING,
+                tr("This group is missing from the database. Applying changes stages a new group."),
+                color::warning(),
+            );
+        } else {
+            ui.label(widgets::muted(tr("A tree row linked to this group grants one of these skills at random.")));
         }
+        ui.add_space(space::SM);
+        ui.columns_const(|[candidates, search]| {
+            self.candidates_column(candidates, env);
+            widgets::control_row(
+                search,
+                |ui| {
+                    widgets::section_title(ui, tr("Find Skills"));
+                },
+                |_| {},
+            );
+            if let SearchInteraction::Activated(skill) = self.search.show(search, env, LIST_HEIGHT, Some(&self.members))
+            {
+                self.add(skill);
+            }
+        });
     }
 
-    /// Middle column: the three buttons, centred against the two lists.
-    fn button_column(&mut self, ui: &mut Ui) {
-        let buttons_height = 3.0 * theme::CONTROL_HEIGHT + 2.0 * space::SM;
-        // Skip the title row and the search row, then centre within the list.
-        ui.add_space(2.0 * (theme::CONTROL_HEIGHT + space::SM) + (LIST_HEIGHT - buttons_height) / 2.0);
-
-        let size = Vec2::new(BUTTON_COLUMN_WIDTH, theme::CONTROL_HEIGHT);
-        let candidate = self.search.selected_skill().cloned();
-        let can_add = candidate.as_ref().is_some_and(|skill| !self.members.contains(&skill.skill_id))
-            && self.members.len() < MAX_GROUP_SKILLS;
-
-        let add = egui::Button::new(trf("Add  {}", &[&icons::ARROW_RIGHT])).min_size(size);
-        if ui.add_enabled(can_add, add).clicked()
-            && let Some(skill) = candidate
-        {
-            self.add(&skill);
-        }
-        let remove = egui::Button::new(widgets::icon_text(icons::DELETE, tr("Remove"))).min_size(size);
-        if ui.add_enabled(self.selected_member.is_some(), remove).clicked()
-            && let Some(skill_id) = self.selected_member
-        {
-            self.remove(skill_id);
-        }
-        let clear = egui::Button::new(widgets::icon_text(icons::CLOSE, tr("Clear"))).min_size(size);
-        if ui.add_enabled(!self.members.is_empty(), clear).clicked() {
-            self.members.clear();
-            self.selected_member = None;
-            self.status = tr("Selection cleared.").to_owned();
-        }
-    }
-
-    /// Right column: title row, a hint where the left column has its search
-    /// box, then the candidate list.
     fn candidates_column(&mut self, ui: &mut Ui, env: &mut DialogContext<'_>) {
         let full = self.members.len() >= MAX_GROUP_SKILLS;
-        let count = format!("{} / {MAX_GROUP_SKILLS}", self.members.len());
+        let count = if full {
+            trf("Group full · {}/{}", &[&MAX_GROUP_SKILLS, &MAX_GROUP_SKILLS])
+        } else {
+            trf("{} of {} slots used", &[&self.members.len(), &MAX_GROUP_SKILLS])
+        };
         widgets::control_row(
             ui,
             |ui| {
-                widgets::section_title(ui, tr("Group candidates"));
+                widgets::section_title(ui, tr("Candidates"));
             },
-            |ui| {
-                let tint = if full { color::warning() } else { color::text_muted() };
-                ui.label(RichText::new(count).size(theme::CAPTION_SIZE).color(tint));
-            },
+            |_| {},
         );
         widgets::control_row(
             ui,
             |ui| {
-                ui.label(widgets::caption(tr("Double-click a candidate to remove it.")));
+                let tint = if full { color::warning() } else { color::text_muted() };
+                ui.label(widgets::caption(count).color(tint));
             },
             |ui| {
-                ui.label(widgets::caption(trf("UseCode {}", &[&self.members.len()])));
+                if widgets::button_enabled(ui, !self.members.is_empty(), icons::CLOSE, tr("Clear All")).clicked() {
+                    self.members.clear();
+                }
             },
         );
 
-        let mut clicked = None;
         let mut removed = None;
         skill_list(ui, "group-members", LIST_HEIGHT, |ui| {
             if self.members.is_empty() {
@@ -241,27 +199,118 @@ impl RandomGroupDialog {
                     ui,
                     icons::RANDOM_GROUP,
                     tr("No candidates yet"),
-                    tr("Double-click a skill on the left to add it."),
+                    tr("Use Find Skills to add a candidate."),
                 );
             }
-            for (index, skill_id) in self.members.iter().enumerate() {
+            for skill_id in &self.members {
                 let display = self.display(env.session, *skill_id);
-                let selected = self.selected_member == Some(*skill_id);
-                let response = skill_row(ui, env, &display, selected, false, Some(index + 1));
-                if response.clicked() {
-                    clicked = Some(*skill_id);
-                }
-                if response.double_clicked() {
+                let (_, clicked) = skill_row_with_action(ui, env, &display, None, |ui| {
+                    widgets::button(ui, icons::CLOSE, tr("Remove"))
+                });
+                if clicked {
                     removed = Some(*skill_id);
                 }
             }
         });
 
-        if let Some(skill_id) = clicked {
-            self.selected_member = Some(skill_id);
-        }
         if let Some(skill_id) = removed {
-            self.remove(skill_id);
+            self.members.retain(|id| *id != skill_id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use egui_kittest::Harness;
+    use egui_kittest::kittest::Queryable;
+
+    use super::*;
+    use crate::textures::TextureStore;
+
+    struct Fixture {
+        dialog: RandomGroupDialog,
+        session: EditSession,
+        textures: Option<TextureStore>,
+        actions: Vec<Action>,
+    }
+
+    const TREE: TreeRef = TreeRef { stage: 3, slot: 1 };
+
+    fn harness(session: EditSession, group: &RandomSkillGroup) -> Harness<'static, Fixture> {
+        Harness::builder().with_size([1100.0, 700.0]).build_ui_state(
+            |ui, fixture: &mut Fixture| {
+                let ctx = ui.ctx();
+                let Some(textures) = fixture.textures.as_mut() else {
+                    crate::theme::apply(ctx);
+                    fixture.textures = Some(TextureStore::new(ctx));
+                    return;
+                };
+                let mut env = DialogContext { session: &fixture.session, textures, actions: &mut fixture.actions };
+                fixture.dialog.show(ctx, egui::Id::new("random-group-test"), &mut env);
+            },
+            Fixture {
+                dialog: RandomGroupDialog::new(TREE, 7, group, false),
+                session,
+                textures: None,
+                actions: Vec::new(),
+            },
+        )
+    }
+
+    #[test]
+    fn candidate_buttons_stage_the_updated_group() {
+        let group = RandomSkillGroup::new(42, [100]);
+        let mut session = EditSession::new();
+        session.ingest_random_groups(&[42], [group.clone()]);
+        let mut harness = harness(session, &group);
+        harness.run();
+        let generation = harness
+            .state()
+            .actions
+            .iter()
+            .find_map(|action| match action {
+                Action::Command(Command::SearchSkills { generation, .. }) => Some(*generation),
+                _ => None,
+            })
+            .unwrap();
+        harness.state_mut().dialog.on_event(&Event::SkillsFound {
+            generation,
+            result: Ok(vec![SkillDisplay {
+                skill_id: 200,
+                skill_name: "New candidate".into(),
+                icon_file_name: None,
+                tooltip_markup: None,
+            }]),
+        });
+        harness.run();
+
+        harness.get_by_label_contains("Add").click();
+        harness.run();
+        assert_eq!(harness.state().dialog.members, [100, 200]);
+
+        harness.get_all_by_label_contains("Remove").next().unwrap().click();
+        harness.run();
+        harness.get_by_label_contains("Apply Group").click();
+        harness.run();
+
+        assert!(harness.state().actions.iter().any(|action| matches!(
+            action,
+            Action::ApplyRandomGroup { attach_to: None, group }
+                if group.group_id == 42 && group.skill_ids() == [200]
+        )));
+    }
+
+    #[test]
+    fn opening_an_unloaded_group_waits_for_its_candidates() {
+        let mut harness = harness(EditSession::new(), &RandomSkillGroup::empty(42));
+        harness.run();
+        assert!(harness.state().actions.is_empty(), "search must wait until the group is loaded");
+
+        let group = RandomSkillGroup::new(42, [100]);
+        harness.state_mut().session.ingest_random_groups(&[42], [group]);
+        harness.run();
+
+        assert_eq!(harness.state().dialog.members, [100]);
+        assert!(!harness.state().dialog.is_dirty());
     }
 }

@@ -43,8 +43,7 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
     // Right to left: the filter button takes its fixed width and the search box the rest.
     let row = Vec2::new(ui.available_width(), theme::CONTROL_HEIGHT);
     ui.allocate_ui_with_layout(row, Layout::right_to_left(Align::Center), |ui| {
-        let filter_active = state.filter.include_riding_only || state.filter.final_only;
-        let tint = if filter_active { color::accent_bright() } else { color::text() };
+        let tint = if state.include_riding_only { color::accent_bright() } else { color::text() };
         let icon = RichText::new(icons::FILTER).size(theme::GLYPH_SIZE).color(tint);
         let filter = egui::Button::new(icon).min_size(Vec2::splat(theme::CONTROL_HEIGHT));
         let keep_open =
@@ -54,10 +53,7 @@ fn search_row(ui: &mut Ui, state: &mut AppState, actions: &mut Vec<Action>) {
             .config(keep_open)
             .ui(ui, |ui| {
                 ui.set_min_width(220.0);
-                let mut changed = ui.checkbox(&mut state.filter.final_only, tr("Final evolutions only")).changed();
-                changed |=
-                    ui.checkbox(&mut state.filter.include_riding_only, tr("Include riding-only summons")).changed();
-                if changed {
+                if ui.checkbox(&mut state.include_riding_only, tr("Include riding-only summons")).changed() {
                     actions.push(Action::Search);
                 }
             })
@@ -89,7 +85,9 @@ fn count_row(ui: &mut Ui, state: &AppState) {
             ui.add(egui::Spinner::new().size(theme::CAPTION_SIZE));
             ui.label(widgets::caption(tr("Loading summons…")));
         } else {
-            ui.label(widgets::caption(trf("{} summons", &[&state.summons.len()])));
+            let count = state.summons.len();
+            let text = if count == 1 { trf("{} summon", &[&count]) } else { trf("{} summons", &[&count]) };
+            ui.label(widgets::caption(text));
         }
     });
 }
@@ -178,10 +176,13 @@ fn row(ui: &mut Ui, summon: &SummonListItem, selected: bool, textures: &mut Text
 
     response.on_hover_ui(|ui| {
         ui.label(RichText::new(&summon.summon_name).font(theme::bold(theme::BODY_SIZE)));
-        let evolves_into = if summon.evolve_target == 0 { "—".to_owned() } else { summon.evolve_target.to_string() };
         ui.label(widgets::caption(trf(
             "ID {}  ·  Form {}  ·  Evolves into {}",
-            &[&summon.summon_id, &summon.form, &evolves_into],
+            &[
+                &summon.summon_id,
+                &summon.form,
+                &if summon.evolve_target == 0 { "—".to_owned() } else { summon.evolve_target.to_string() },
+            ],
         )));
         ui.label(widgets::caption(format!(
             "{}  {} ({})",

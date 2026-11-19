@@ -4,7 +4,7 @@
 //! one shared line, help text under the control it belongs to.
 
 use eframe::egui::{self, RichText, Ui};
-use ysm_data::{AppSettings, DbProvider, ThemeChoice};
+use ysm_data::{AppSettings, DatabaseEngine, ThemeChoice};
 
 use super::DialogContext;
 use crate::action::Action;
@@ -178,26 +178,18 @@ impl SettingsDialog {
         let database = &mut self.working.database;
         let mut edited = false;
 
-        widgets::form_row(ui, tr("Server type"), |ui| {
-            let segments = DbProvider::ALL.map(|provider| widgets::Segment {
-                icon: icons::DATABASE,
-                label: provider.label(),
-                tooltip: match provider {
-                    DbProvider::Mssql => tr("Microsoft SQL Server"),
-                    DbProvider::PostgreSql => tr("PostgreSQL; tables are found through the database's search_path"),
-                },
-            });
-            let selected = DbProvider::ALL.iter().position(|p| *p == database.provider).unwrap_or(0);
-            if let Some(index) = widgets::segmented(ui, &segments, selected, 112.0) {
-                let provider = DbProvider::ALL[index];
-                if provider != database.provider {
-                    // Follow the default port unless the user typed another one.
-                    if self.port_text.trim() == database.provider.default_port().to_string() {
-                        self.port_text = provider.default_port().to_string();
-                    }
-                    database.provider = provider;
-                    edited = true;
+        widgets::form_row(ui, tr("Engine"), |ui| {
+            let previous = database.engine;
+            egui::ComboBox::from_id_salt("database_engine").selected_text(previous.label()).show_ui(ui, |ui| {
+                for engine in DatabaseEngine::ALL {
+                    ui.selectable_value(&mut database.engine, engine, engine.label());
                 }
+            });
+            if database.engine != previous {
+                if self.port_text.trim() == previous.default_port().to_string() {
+                    self.port_text = database.engine.default_port().to_string();
+                }
+                edited = true;
             }
         });
         widgets::form_row(ui, tr("Server"), |ui| {
@@ -228,8 +220,8 @@ impl SettingsDialog {
                 self.show_password = !self.show_password;
             }
         });
-        match database.provider {
-            DbProvider::Mssql => {
+        match database.engine {
+            DatabaseEngine::SqlServer | DatabaseEngine::MariaDb => {
                 help(ui, tr("Stored in plain text in settings.json under %LOCALAPPDATA%\\YSMSummonEditor."));
                 widgets::form_row(ui, tr("Trust server certificate"), |ui| {
                     edited |=
@@ -240,7 +232,7 @@ impl SettingsDialog {
                             .changed();
                 });
             }
-            DbProvider::PostgreSql => help(
+            DatabaseEngine::PostgreSql => help(
                 ui,
                 tr("Leave empty to read it from the PostgreSQL password file (PGPASSFILE, ~/.pgpass or \
                     %APPDATA%\\postgresql\\pgpass.conf). A password typed here is stored in plain text in settings.json."),

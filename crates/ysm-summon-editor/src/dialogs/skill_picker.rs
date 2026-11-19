@@ -43,7 +43,7 @@ impl SkillPickerDialog {
                 },
                 |ui| self.search.status(ui),
             );
-            if let SearchInteraction::Activated(skill) = self.search.show(ui, env, LIST_HEIGHT, |_| false) {
+            if let SearchInteraction::Activated(skill) = self.search.show(ui, env, LIST_HEIGHT, None) {
                 picked = Some(skill);
             }
 

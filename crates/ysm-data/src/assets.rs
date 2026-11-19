@@ -34,16 +34,22 @@ impl AssetIndex {
             let Ok(entries) = std::fs::read_dir(&dir) else {
                 continue;
             };
-            let mut entries: Vec<PathBuf> = entries.flatten().map(|entry| entry.path()).collect();
-            entries.sort();
+            let mut entries: Vec<_> = entries.flatten().collect();
+            entries.sort_by_cached_key(std::fs::DirEntry::file_name);
 
-            for path in entries {
-                if path.is_dir() {
-                    pending.push(path);
-                } else if has_image_extension(&path)
-                    && let Some(name) = path.file_name().and_then(|n| n.to_str())
+            for entry in entries {
+                // On Windows the directory listing already contains the file type.
+                let is_directory = match entry.file_type() {
+                    Ok(kind) if !kind.is_symlink() => kind.is_dir(),
+                    _ => entry.path().is_dir(),
+                };
+                let name = entry.file_name();
+                if is_directory {
+                    pending.push(entry.path());
+                } else if has_image_extension(Path::new(&name))
+                    && let Some(name) = name.to_str()
                 {
-                    files.entry(name.to_lowercase()).or_insert(path);
+                    files.entry(name.to_lowercase()).or_insert_with(|| entry.path());
                 }
             }
         }

@@ -22,7 +22,7 @@ use ysm_core::random_group::RandomSkillGroup;
 use ysm_core::sql_script::{SqlDialect, render_script};
 use ysm_core::value::{FieldKind, FieldValue};
 use ysm_data::env_local::parse_connection_string_for;
-use ysm_data::{DataError, DbProvider, PgRepository, SummonRepository, loader};
+use ysm_data::{DataError, DatabaseEngine, PgRepository, SummonRepository, loader};
 
 fn save(repo: &mut PgRepository, request: &CommitRequest) {
     repo.commit(request).expect("save");
@@ -40,7 +40,7 @@ fn reload(repo: &mut PgRepository, summon_id: i32) -> SummonListItem {
 #[ignore = "changes a live PostgreSQL database"]
 fn every_kind_of_save_round_trips() {
     let connection = std::env::var("YSM_PG_WRITE_TEST_CONNECTION").expect("set YSM_PG_WRITE_TEST_CONNECTION");
-    let settings = parse_connection_string_for(DbProvider::PostgreSql, &connection).expect("connection string");
+    let settings = parse_connection_string_for(DatabaseEngine::PostgreSql, &connection).expect("connection string");
     let mut repo = PgRepository::new(settings).unwrap();
     println!("server: {}", repo.test_connection().unwrap());
 

@@ -6,7 +6,7 @@
 
 use rust_decimal::Decimal;
 use rust_decimal::prelude::{FromPrimitive, ToPrimitive};
-use tiberius::{ColumnData, Row};
+use tiberius::ColumnData;
 use ysm_core::value::{FieldKind, FieldValue};
 
 pub(super) fn cell_decimal(cell: &ColumnData<'_>) -> Option<Decimal> {
@@ -86,8 +86,8 @@ pub(super) fn cell_field(cell: &ColumnData<'_>) -> (FieldKind, FieldValue) {
 pub(super) struct Cells(std::vec::IntoIter<ColumnData<'static>>);
 
 impl Cells {
-    pub(super) fn new(row: Row) -> Self {
-        Self(row.into_iter())
+    pub(super) fn new(values: std::vec::IntoIter<ColumnData<'static>>) -> Self {
+        Self(values)
     }
 
     fn next(&mut self) -> ColumnData<'static> {

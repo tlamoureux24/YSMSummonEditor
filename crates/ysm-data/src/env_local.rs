@@ -7,7 +7,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::settings::{DbProvider, DbSettings};
+use crate::settings::{DatabaseEngine, DbSettings};
 
 const CONNECTION_STRING_KEY: &str = "YSM_DB_CONNECTION_STRING";
 const PROVIDER_KEY: &str = "YSM_DB_PROVIDER";
@@ -21,7 +21,7 @@ pub fn load_db_settings() -> Option<(DbSettings, PathBuf)> {
 
     let path = find_env_local(&roots)?;
     let content = std::fs::read_to_string(&path).ok()?;
-    let provider = read_value(&content, PROVIDER_KEY).and_then(|v| DbProvider::parse(&v)).unwrap_or_default();
+    let provider = read_value(&content, PROVIDER_KEY).and_then(|v| DatabaseEngine::parse(&v)).unwrap_or_default();
     let settings = parse_connection_string_for(provider, &read_connection_string(&content)?)?;
     Some((settings, path))
 }
@@ -56,12 +56,12 @@ fn read_value(content: &str, wanted: &str) -> Option<String> {
 /// Parses an ADO-style MSSQL connection string. Returns `None` unless
 /// server, database and user are all present.
 pub fn parse_connection_string(connection_string: &str) -> Option<DbSettings> {
-    parse_connection_string_for(DbProvider::Mssql, connection_string)
+    parse_connection_string_for(DatabaseEngine::SqlServer, connection_string)
 }
 
 /// Parses a connection string for a provider. PostgreSQL strings in the
 /// Npgsql style (`Host=…;Port=…;Username=…`) are accepted too.
-pub fn parse_connection_string_for(provider: DbProvider, connection_string: &str) -> Option<DbSettings> {
+pub fn parse_connection_string_for(provider: DatabaseEngine, connection_string: &str) -> Option<DbSettings> {
     let pairs = split_pairs(connection_string);
     let get = |keys: &[&str]| {
         keys.iter().find_map(|key| {
@@ -69,7 +69,7 @@ pub fn parse_connection_string_for(provider: DbProvider, connection_string: &str
         })
     };
 
-    let mut settings = DbSettings::for_provider(provider);
+    let mut settings = DbSettings::for_engine(provider);
     if let Some(server) = get(&["Server", "Host", "Data Source", "Address", "Addr", "Network Address"]) {
         let server = server.strip_prefix("tcp:").unwrap_or(&server);
         match server.split_once(',') {
@@ -171,15 +171,16 @@ mod tests {
     #[test]
     fn postgres_strings_use_their_own_keys_and_default_port() {
         let settings =
-            parse_connection_string_for(DbProvider::PostgreSql, "Host=127.0.0.1;Database=arcadia;Username=rz").unwrap();
-        assert_eq!(settings.provider, DbProvider::PostgreSql);
+            parse_connection_string_for(DatabaseEngine::PostgreSql, "Host=127.0.0.1;Database=arcadia;Username=rz")
+                .unwrap();
+        assert_eq!(settings.engine, DatabaseEngine::PostgreSql);
         assert_eq!(settings.server, "127.0.0.1");
         assert_eq!(settings.port, 5432);
         assert_eq!(settings.user_id, "rz");
         assert!(settings.password.is_empty(), "the password may come from the pgpass file");
 
         let with_port =
-            parse_connection_string_for(DbProvider::PostgreSql, "Host=h;Port=5433;Database=d;Username=u").unwrap();
+            parse_connection_string_for(DatabaseEngine::PostgreSql, "Host=h;Port=5433;Database=d;Username=u").unwrap();
         assert_eq!(with_port.port, 5433);
     }
 

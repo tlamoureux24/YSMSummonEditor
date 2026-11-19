@@ -35,12 +35,6 @@ impl ConnectionStatus {
     }
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub struct ListFilter {
-    pub include_riding_only: bool,
-    pub final_only: bool,
-}
-
 pub struct AppState {
     pub settings: AppSettings,
     pub demo: bool,
@@ -55,7 +49,7 @@ pub struct AppState {
     pub search_edited_at: Option<Instant>,
     /// Set to move keyboard focus into the search box on the next frame.
     pub focus_search: bool,
-    pub filter: ListFilter,
+    pub include_riding_only: bool,
     pub summons: Vec<SummonListItem>,
     pub summons_loading: bool,
     /// The summon whose chain is loaded (or loading).
@@ -85,7 +79,7 @@ impl AppState {
             search_text: String::new(),
             search_edited_at: None,
             focus_search: false,
-            filter: ListFilter::default(),
+            include_riding_only: false,
             summons: Vec::new(),
             summons_loading: false,
             selected_summon: None,
@@ -138,9 +132,9 @@ impl AppState {
     pub fn summon_filter(&self) -> SummonListFilter {
         SummonListFilter {
             search_text: self.search_text.trim().to_owned(),
-            include_riding_only: self.filter.include_riding_only,
+            include_riding_only: self.include_riding_only,
             include_non_form1: true,
-            show_all_evolutions: !self.filter.final_only,
+            show_all_evolutions: false,
         }
     }
 
@@ -153,6 +147,16 @@ impl AppState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sidebar_always_requests_final_evolutions() {
+        let settings = AppSettings { show_all_evolutions_by_default: true, ..Default::default() };
+        let mut state = AppState::new(settings, false);
+        assert!(!state.summon_filter().show_all_evolutions);
+
+        state.search_text = "1011".into();
+        assert!(!state.summon_filter().show_all_evolutions);
+    }
 
     fn failure(kind: FailureKind) -> Failure {
         Failure { kind, message: "socket closed".into() }

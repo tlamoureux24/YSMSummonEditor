@@ -1,6 +1,8 @@
 //! Applies results coming back from the worker thread.
 
 use ysm_core::random_group::{RandomSkillGroup, next_free_group_id};
+use ysm_core::scaling::GrowthModel;
+use ysm_data::DatabaseEngine;
 
 use super::EditorApp;
 use crate::dialogs::random_group::RandomGroupDialog;
@@ -48,7 +50,12 @@ impl EditorApp {
                 self.state.summons_loading = false;
                 match result {
                     Ok(summons) => {
-                        self.set_status(trf("Loaded {} summons.", &[&summons.len()]));
+                        let count = summons.len();
+                        self.set_status(if count == 1 {
+                            trf("Loaded {} summon.", &[&count])
+                        } else {
+                            trf("Loaded {} summons.", &[&count])
+                        });
                         self.state.summons = summons;
                     }
                     Err(error) => {
@@ -115,14 +122,32 @@ impl EditorApp {
                 ))),
             },
 
-            Event::ScalingLoaded(Ok((db, creature_enhance))) => {
+            Event::ScalingLoaded(Ok(data)) => {
+                let mut db = data.current;
+                let Some(chain) = self.state.session.chain().filter(|chain| chain.stage3.summon_id == db.summon_id)
+                else {
+                    return;
+                };
+                let name = chain.stage3.summon_name.clone();
+                let model = if !self.state.demo && self.state.settings.database.engine == DatabaseEngine::MariaDb {
+                    GrowthModel::Aurumis
+                } else {
+                    GrowthModel::Legacy
+                };
+                if model == GrowthModel::Aurumis {
+                    // The engine looks up the bonus by the actual form ID. Linked forms
+                    // are not necessarily consecutive resource IDs.
+                    db.stage_bonuses = data
+                        .earlier
+                        .iter()
+                        .chain(std::iter::once(&db))
+                        .filter_map(|form| form.stage_bonuses.iter().find(|bonus| bonus.lookup_id == form.summon_id))
+                        .cloned()
+                        .collect();
+                }
                 let staged = self.state.session.pending_scaling(&db);
-                let name = self
-                    .state
-                    .session
-                    .chain()
-                    .map_or_else(|| trf("Summon {}", &[&db.summon_id]), |chain| chain.stage3.summon_name.clone());
-                let dialog = StatScalingDialog::new(name, &db, &staged, &creature_enhance);
+                let earlier = data.earlier.iter().map(|form| self.state.session.pending_scaling(form)).collect();
+                let dialog = StatScalingDialog::new(name, &db, &staged, &data.enhance, model, earlier);
                 self.push_dialog(Dialog::StatScaling(Box::new(dialog)));
                 self.set_status(tr("Stat scaling loaded."));
             }

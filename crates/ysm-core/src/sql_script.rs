@@ -1,5 +1,5 @@
-//! Renders a [`CommitRequest`] as an executable SQL script, in T-SQL for
-//! MSSQL or in plain SQL for PostgreSQL.
+//! Renders a [`CommitRequest`] as an executable SQL script: T-SQL for SQL
+//! Server, a compound statement for MariaDB, plain SQL for PostgreSQL.
 //!
 //! The script mirrors what a direct database save does, statement for
 //! statement, and runs as a single transaction. IDs of cloned trees and stat
@@ -7,27 +7,172 @@
 
 use std::fmt::Write;
 
-use crate::commit::{CommitRequest, StatCommit, TreeCommit, is_sql_identifier, tree_slot_column};
+use crate::commit::{
+    CommitRequest, StatCommit, TreeCommit, is_sql_identifier, is_updatable_skill_column, tree_slot_column,
+};
 use crate::model::{SkillTreeEntry, Stat};
 use crate::random_group::RandomSkillGroup;
+use crate::value::FieldValue;
 
 const TREE_COLUMNS: &str = "skill_tree_id, skill_id, skill_group_id, min_skill_lv, max_skill_lv, lv, job_lv, \
      need_skill_id_1, need_skill_lv_1, need_skill_id_2, need_skill_lv_2, need_skill_id_3, need_skill_lv_3, \
-     cenhance_min, cenhance_max, jp_ratio";
+     cenhance_min, cenhance_max";
 
 /// The SQL flavour of a script.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub enum SqlDialect {
-    /// MSSQL.
+    /// SQL Server.
     #[default]
     TSql,
+    MariaDb,
     PostgreSql,
+}
+
+/// The CLI delimiter directives are only needed for export. The application
+/// sends the same compound statement directly over the database connection.
+pub fn render_mariadb_script(request: &CommitRequest, generated_at: &str) -> String {
+    format!(
+        "-- YSM Summon Editor change script for MariaDB\n\
+         -- Generated: {generated_at}\n\
+         -- Run as a standalone transaction in the target database.\n\
+         DELIMITER //\n{}//\nDELIMITER ;\n",
+        mariadb_batch(request)
+    )
+}
+
+pub fn mariadb_batch(request: &CommitRequest) -> String {
+    let mut sql = String::from(
+        "BEGIN NOT ATOMIC\n\
+         DECLARE new_tree_id INT;\n\
+         DECLARE new_stat_id INT;\n\
+         DECLARE EXIT HANDLER FOR SQLEXCEPTION BEGIN ROLLBACK; RESIGNAL; END;\n\
+         SET TRANSACTION ISOLATION LEVEL SERIALIZABLE;\n\
+         START TRANSACTION;\n",
+    );
+    for tree in &request.trees {
+        let target = if tree.clone_if_shared {
+            let Some(column) = tree_slot_column(tree.slot) else {
+                let _ = writeln!(sql, "SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'Invalid skill tree slot';");
+                continue;
+            };
+            // Empty trees are also reserved by their references in SummonResource.
+            let _ = writeln!(
+                sql,
+                "SET new_tree_id = 1 + GREATEST(
+                    COALESCE((SELECT MAX(skill_tree_id) FROM SkillTreeResource), 0),
+                    COALESCE((SELECT MAX(GREATEST(skill_tree1_id, skill_tree2_id, skill_tree3_id, skill_tree4_id, skill_tree5_id)) FROM SummonResource), 0)
+                );
+                UPDATE SummonResource SET {column} = new_tree_id WHERE id = {} AND {column} = {};
+                IF ROW_COUNT() <> 1 THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'The summon skill tree changed. Reload before saving.';
+                END IF;",
+                tree.summon_id, tree.original_tree_id
+            );
+            "new_tree_id".to_owned()
+        } else {
+            let _ = writeln!(sql, "DELETE FROM SkillTreeResource WHERE skill_tree_id = {};", tree.original_tree_id);
+            tree.original_tree_id.to_string()
+        };
+        for entry in &tree.entries {
+            let _ = writeln!(
+                sql,
+                "INSERT INTO SkillTreeResource ({TREE_COLUMNS}, jp_ratio) VALUES ({target}, {}, {});",
+                entry_values(entry),
+                entry.jp_ratio
+            );
+        }
+    }
+
+    let stat_columns = Stat::ALL.map(|stat| format!("`{}`", stat.column()));
+    let columns = stat_columns.join(", ");
+    for stat in request.stats.iter().filter(|stat| stat.original_stat_id > 0 && stat.summon_id > 0) {
+        if stat.clone_if_shared {
+            let values = stat.stats.values.map(|value| value.to_string()).join(", ");
+            let _ = writeln!(
+                sql,
+                "SET new_stat_id = 1 + GREATEST(
+                    COALESCE((SELECT MAX(id) FROM StatResource), 0),
+                    COALESCE((SELECT MAX(stat_id) FROM SummonResource), 0)
+                );
+                INSERT INTO StatResource (id, {columns}) VALUES (new_stat_id, {values});
+                UPDATE SummonResource SET stat_id = new_stat_id WHERE id = {} AND stat_id = {};
+                IF ROW_COUNT() <> 1 THEN
+                    SIGNAL SQLSTATE '45000' SET MESSAGE_TEXT = 'The summon stat row changed. Reload before saving.';
+                END IF;",
+                stat.summon_id, stat.original_stat_id
+            );
+        } else {
+            let assignments = assignments(&stat_columns, &stat.stats.values);
+            let _ = writeln!(sql, "UPDATE StatResource SET {assignments} WHERE id = {};", stat.original_stat_id);
+        }
+    }
+    for bonus in request.level_bonuses.iter().filter(|bonus| bonus.bonus_id > 0) {
+        let id = bonus.bonus_id;
+        let assignments = assignments(&stat_columns, &bonus.values);
+        let values = bonus.values.map(|value| value.to_string()).join(", ");
+        // This resource has no unique key on id in the Arcadia schema.
+        let _ = writeln!(
+            sql,
+            "IF EXISTS (SELECT 1 FROM CreatureLevelBonus WHERE id = {id}) THEN
+                UPDATE CreatureLevelBonus SET {assignments} WHERE id = {id};
+            ELSE
+                INSERT INTO CreatureLevelBonus (id, {columns}) VALUES ({id}, {values});
+            END IF;"
+        );
+    }
+    for group in request.random_groups.iter().filter(|group| group.group_id > 0) {
+        let slots = group.slots();
+        let columns: Vec<_> = (1..=slots.len()).map(|index| format!("skill_id_{index}")).collect();
+        let assignments = assignments(&columns, &slots);
+        let columns = columns.join(", ");
+        let values = slots.map(|value| value.to_string()).join(", ");
+        let id = group.group_id;
+        let use_code = group.use_code();
+        let _ = writeln!(
+            sql,
+            "INSERT INTO SummonRandomSkillResource (sid, use_code, {columns}) VALUES ({id}, {use_code}, {values})
+             ON DUPLICATE KEY UPDATE use_code = {use_code}, {assignments};"
+        );
+    }
+    for skill in &request.skills {
+        let assignments: Vec<_> = skill
+            .changes
+            .iter()
+            .filter(|change| is_updatable_skill_column(change))
+            .map(|change| format!("`{}` = {}", change.name, mariadb_literal(&change.new)))
+            .collect();
+        if !assignments.is_empty() {
+            let _ = writeln!(sql, "UPDATE SkillResource SET {} WHERE id = {};", assignments.join(", "), skill.skill_id);
+        }
+    }
+    sql.push_str("COMMIT;\nEND");
+    sql
+}
+
+fn assignments(columns: &[String], values: &[impl std::fmt::Display]) -> String {
+    columns.iter().zip(values).map(|(column, value)| format!("{column} = {value}")).collect::<Vec<_>>().join(", ")
+}
+
+fn mariadb_literal(value: &FieldValue) -> String {
+    match value {
+        FieldValue::Text(text) | FieldValue::Unsupported(text) => {
+            // Hex preserves backslashes and Unicode independently of SQL_MODE.
+            let mut literal = String::from("CONVERT(X'");
+            for byte in text.bytes() {
+                let _ = write!(literal, "{byte:02x}");
+            }
+            literal.push_str("' USING utf8mb4)");
+            literal
+        }
+        value => value.sql_literal(),
+    }
 }
 
 /// `generated_at` is only printed in the header comment.
 pub fn render_script(request: &CommitRequest, generated_at: &str, dialect: SqlDialect) -> String {
     match dialect {
         SqlDialect::TSql => render_tsql(request, generated_at),
+        SqlDialect::MariaDb => render_mariadb_script(request, generated_at),
         SqlDialect::PostgreSql => postgres::render(request, generated_at),
     }
 }
@@ -138,7 +283,7 @@ fn write_tree(w: &mut String, tree: &TreeCommit, clone_index: &mut u32) {
 
 fn entry_values(e: &SkillTreeEntry) -> String {
     format!(
-        "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}",
+        "{}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}, {}",
         e.skill_id,
         e.skill_group_id,
         e.min_skill_lv,
@@ -152,8 +297,7 @@ fn entry_values(e: &SkillTreeEntry) -> String {
         e.need_skill_id[2],
         e.need_skill_lv[2],
         e.cenhance_min,
-        e.cenhance_max,
-        e.jp_ratio
+        e.cenhance_max
     )
 }
 
@@ -355,8 +499,9 @@ mod postgres {
         for entry in &tree.entries {
             let _ = writeln!(
                 w,
-                "INSERT INTO SkillTreeResource ({TREE_COLUMNS}) VALUES ({target}, {});",
-                entry_values(entry)
+                "INSERT INTO SkillTreeResource ({TREE_COLUMNS}, jp_ratio) VALUES ({target}, {}, {});",
+                entry_values(entry),
+                entry.jp_ratio
             );
         }
     }
@@ -441,7 +586,7 @@ mod tests {
         let sql = render_script(&request, "now", SqlDialect::TSql);
 
         assert!(sql.contains("DELETE FROM SkillTreeResource WHERE skill_tree_id = 30;"));
-        assert!(sql.contains("VALUES (30, 400, 0, 1, 1, 5, 1, 0, 0, 9, 0, 0, 0, 0, 0, 1);"));
+        assert!(sql.contains("VALUES (30, 400, 0, 1, 1, 5, 1, 0, 0, 9, 0, 0, 0, 0, 0);"));
         assert!(!sql.contains("DECLARE"));
     }
 
